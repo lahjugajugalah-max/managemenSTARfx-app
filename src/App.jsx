@@ -186,10 +186,10 @@ export default function App() {
             {trades.map((t, idx) => {
               const height = Math.min(Math.abs(t.pnl) * 2, 100);
               return (
-                <div key={idx} style={styles.barCol} title={$${t.pnl}}>
+                <div key={idx} style={styles.barCol} title={`$${t.pnl}`}>
                   <div 
                     style={{
-                      height: ${height || 5}px,
+                      height: `${height || 5}px`,
                       width: '14px',
                       backgroundColor: t.pnl >= 0 ? '#10B981' : '#EF4444',
                       borderRadius: '3px'
@@ -259,7 +259,7 @@ export default function App() {
                       <td style={{...styles.td, color: item.type === 'BUY' ? '#3B82F6' : '#F59E0B'}}>{item.type}</td>
                       <td style={styles.td}>{item.lot}</td>
                       <td style={{...styles.td, color: item.pnl >= 0 ? '#10B981' : '#EF4444', fontWeight: 'bold'}}>
-                        {item.pnl >= 0 ? +$${item.pnl} : -$${Math.abs(item.pnl)}}
+                        {item.pnl >= 0 ? `+$${item.pnl}` : `-$${Math.abs(item.pnl)}`}
                       </td>
                       <td style={styles.td}>
                         <button onClick={() => handleDelete(item.id)} style={{...styles.btnDanger, padding: '2px 6px', fontSize: '11px'}}>Hapus</button>
