@@ -3,7 +3,7 @@ import {
   getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged 
 } from 'firebase/auth';
 import { 
-  getFirestore, collection, addDoc, query, where, onSnapshot, deleteDoc, doc, orderBy 
+  getFirestore, collection, addDoc, query, where, onSnapshot, deleteDoc, doc 
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { 
@@ -16,23 +16,18 @@ export default function App() {
   const [user, setUser] = useState(null);
   const [isRegister, setIsRegister] = useState(false);
   
-  // State Form Login/Register
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
 
-  // State Pembukuan Forex
   const [trades, setTrades] = useState([]);
   const [pair, setPair] = useState('EURUSD');
   const [type, setType] = useState('BUY');
   const [lot, setLot] = useState('');
   const [pnl, setPnl] = useState('');
   const [notes, setNotes] = useState('');
-  
-  // State Pencarian
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Cek Status Login
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
@@ -40,20 +35,17 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Ambil Data dari Firestore
   useEffect(() => {
     if (!user) return;
     const q = query(collection(db, 'forex_trades'), where('userId', '==', user.uid));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const tradeData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      // Urutkan berdasarkan waktu (timestamp)
       tradeData.sort((a, b) => a.timestamp - b.timestamp);
       setTrades(tradeData);
     });
     return () => unsubscribe();
   }, [user]);
 
-  // Fungsi Auth
   const handleAuth = async (e) => {
     e.preventDefault();
     setAuthError('');
@@ -68,7 +60,6 @@ export default function App() {
     }
   };
 
-  // Tambah Transaksi
   const handleAddTrade = async (e) => {
     e.preventDefault();
     if (!lot || !pnl) return;
@@ -81,7 +72,7 @@ export default function App() {
       pnl: parseFloat(pnl),
       notes,
       date: new Date().toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }),
-      timestamp: new Date().getTime() // Untuk urutan grafik
+      timestamp: new Date().getTime()
     });
 
     setLot('');
@@ -89,26 +80,23 @@ export default function App() {
     setNotes('');
   };
 
-  // Hapus Transaksi
   const handleDelete = async (id) => {
     if(window.confirm("Yakin ingin menghapus jurnal ini?")) {
       await deleteDoc(doc(db, 'forex_trades', id));
     }
   };
 
-  // --- LOGIKA STATISTIK & GRAFIK ---
   const totalPnl = trades.reduce((acc, item) => acc + item.pnl, 0);
   const totalWin = trades.filter(t => t.pnl > 0).length;
   const totalLoss = trades.filter(t => t.pnl < 0).length;
   const winRate = trades.length ? ((totalWin / trades.length) * 100).toFixed(1) : 0;
 
-  // Siapkan Data untuk Chart (Growth PnL Akumulatif)
   const chartData = useMemo(() => {
     let runningBalance = 0;
     return trades.map((t, index) => {
       runningBalance += t.pnl;
       return {
-        tradeCount: Trade ${index + 1},
+        tradeCount: `Trade ${index + 1}`,
         balance: runningBalance,
         pair: t.pair,
         pnl: t.pnl
@@ -116,13 +104,11 @@ export default function App() {
     });
   }, [trades]);
 
-  // Filter Data Tabel
   const filteredTrades = trades.filter(t => 
     t.pair.toLowerCase().includes(searchTerm.toLowerCase()) || 
     t.notes.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // --- TAMPILAN 1: HALAMAN LOGIN / REGISTER ---
   if (!user) {
     return (
       <div style={styles.authContainer}>
@@ -147,7 +133,6 @@ export default function App() {
     );
   }
 
-  // --- TAMPILAN 2: DASHBOARD UTAMA ---
   return (
     <div style={styles.dashboard}>
       <header style={styles.nav}>
@@ -159,7 +144,6 @@ export default function App() {
       </header>
 
       <div style={styles.content}>
-        {/* STATISTIK ATAS */}
         <div style={styles.statsGrid}>
           <div style={styles.card}>
             <span style={styles.cardTitle}>Net Profit / Loss</span>
@@ -179,7 +163,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* GRAFIK LINE CHART PROFESIONAL */}
         <div style={{...styles.card, marginBottom: '20px', height: '350px'}}>
           <h4 style={{marginBottom: '20px', color: '#f8fafc', fontWeight: '500'}}>📈 Grafik Pertumbuhan Akun (PnL Kumulatif)</h4>
           {trades.length === 0 ? (
@@ -189,28 +172,16 @@ export default function App() {
               <LineChart data={chartData} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                 <XAxis dataKey="tradeCount" stroke="#64748b" fontSize={12} tickLine={false} />
-                <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => $${value}} />
-                <Tooltip 
-                  contentStyle={{backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px', color: '#fff'}}
-                  itemStyle={{color: '#38bdf8'}}
-                />
+                <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `$${value}`} />
+                <Tooltip contentStyle={{backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px', color: '#fff'}} itemStyle={{color: '#38bdf8'}} />
                 <ReferenceLine y={0} stroke="#334155" />
-                <Line 
-                  type="monotone" 
-                  dataKey="balance" 
-                  name="Total Saldo PnL" 
-                  stroke="#38bdf8" 
-                  strokeWidth={3} 
-                  dot={{ r: 4, fill: '#0f172a', stroke: '#38bdf8', strokeWidth: 2 }} 
-                  activeDot={{ r: 6, fill: '#38bdf8' }} 
-                />
+                <Line type="monotone" dataKey="balance" name="Total Saldo PnL" stroke="#38bdf8" strokeWidth={3} dot={{ r: 4, fill: '#0f172a', stroke: '#38bdf8', strokeWidth: 2 }} activeDot={{ r: 6, fill: '#38bdf8' }} />
               </LineChart>
             </ResponsiveContainer>
           )}
         </div>
 
         <div style={styles.mainGrid}>
-          {/* FORM INPUT TRANSAKSI */}
           <div style={styles.card}>
             <h4 style={{marginBottom: '15px', color: '#f8fafc', fontWeight: '500'}}>✍️ Catat Transaksi Baru</h4>
             <form onSubmit={handleAddTrade} style={{display: 'flex', flexDirection: 'column', gap: '12px'}}>
@@ -255,17 +226,10 @@ export default function App() {
             </form>
           </div>
 
-          {/* TABEL DATA DENGAN PENCARIAN */}
           <div style={{...styles.card, display: 'flex', flexDirection: 'column'}}>
             <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px'}}>
               <h4 style={{color: '#f8fafc', fontWeight: '500', margin: 0}}>📋 Riwayat Perdagangan</h4>
-              <input 
-                type="text" 
-                placeholder="🔍 Cari Pair / Catatan..." 
-                value={searchTerm} 
-                onChange={(e) => setSearchTerm(e.target.value)} 
-                style={{...styles.input, width: '200px', padding: '6px 12px', fontSize: '13px'}}
-              />
+              <input type="text" placeholder="🔍 Cari Pair / Catatan..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{...styles.input, width: '200px', padding: '6px 12px', fontSize: '13px'}} />
             </div>
 
             <div style={{overflowX: 'auto'}}>
@@ -285,7 +249,6 @@ export default function App() {
                   {filteredTrades.length === 0 ? (
                     <tr><td colSpan="7" style={{padding: '20px', textAlign: 'center', color: '#64748b'}}>Data tidak ditemukan...</td></tr>
                   ) : (
-                    // Tampilkan data terbaru di atas
                     [...filteredTrades].reverse().map((item) => (
                       <tr key={item.id} style={styles.trHover}>
                         <td style={styles.td}>{item.date}</td>
@@ -296,7 +259,7 @@ export default function App() {
                           {item.notes || '-'}
                         </td>
                         <td style={{...styles.td, color: item.pnl >= 0 ? '#10B981' : '#EF4444', fontWeight: 'bold'}}>
-                          {item.pnl >= 0 ? +$${item.pnl} : -$${Math.abs(item.pnl)}}
+                          {item.pnl >= 0 ? `+$${item.pnl}` : `-$${Math.abs(item.pnl)}`}
                         </td>
                         <td style={styles.td}>
                           <button onClick={() => handleDelete(item.id)} style={styles.btnDelete}>🗑️</button>
@@ -314,7 +277,6 @@ export default function App() {
   );
 }
 
-// --- DESAIN TAMPILAN PROFESIONAL (CSS KODE) ---
 const styles = {
   authContainer: { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#020617', fontFamily: "'Inter', sans-serif" },
   authCard: { width: '100%', maxWidth: '380px', padding: '35px', backgroundColor: '#0f172a', borderRadius: '16px', border: '1px solid #1e293b', color: '#f8fafc', boxShadow: '0 20px 40px rgba(0,0,0,0.4)', textAlign: 'center' },
@@ -340,6 +302,6 @@ const styles = {
   table: { width: '100%', borderCollapse: 'collapse', fontSize: '13px' },
   th: { padding: '12px 10px', color: '#64748b', fontWeight: '500', textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.5px' },
   td: { padding: '12px 10px', borderBottom: '1px solid #1e293b' },
-  trHover: { transition: 'background-color 0.2s', ':hover': { backgroundColor: '#1e293b' } },
+  trHover: { transition: 'background-color 0.2s' },
   badge: { backgroundColor: '#1e293b', padding: '4px 8px', borderRadius: '4px', fontSize: '12px', color: '#f8fafc', border: '1px solid #334155' }
 };
