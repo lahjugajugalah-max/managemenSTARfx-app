@@ -1,21 +1,18 @@
-// Import the functions you need from the SDKs you need
 import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
+import { getFirestore } from "firebase/firestore";
 
-// Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
+// Config firebase milik kamu
 const firebaseConfig = {
-  apiKey: "AIzaSyDf6DOoTSSoq0GPeaM-F73nix4G64UDYDA",
-  authDomain: "managementstarfx.firebaseapp.com",
-  projectId: "managementstarfx",
-  storageBucket: "managementstarfx.firebasestorage.app",
-  messagingSenderId: "649505848912",
-  appId: "1:649505848912:web:d77ebd568ddc22a64d9b55",
-  measurementId: "G-4KW0Q0VWYX"
+  apiKey: "YOUR_API_KEY",
+  authDomain: "YOUR_PROJECT.firebaseapp.com",
+  projectId: "YOUR_PROJECT_ID",
+  storageBucket: "YOUR_PROJECT.appspot.com",
+  messagingSenderId: "YOUR_SENDER_ID",
+  appId: "YOUR_APP_ID"
 };
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
+
+// BAHAN PENTING YANG KURANG:
+export const db = getFirestore(app);
