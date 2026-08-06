@@ -3,9 +3,9 @@ import {
   getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged 
 } from 'firebase/auth';
 import { 
-  getFirestore, collection, addDoc, query, where, onSnapshot, deleteDoc, doc 
+  getFirestore, collection, addDoc, query, where, onSnapshot, deleteDoc, doc, setDoc, getDoc 
 } from 'firebase/firestore';
-import { db } from './firebase';
+import { db } from './firebase'; // Pastikan path ini sesuai dengan file firebase Anda
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Area, AreaChart 
 } from 'recharts';
@@ -21,6 +21,7 @@ export default function App() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
+  const [currency, setCurrency] = useState('USD'); // State Mata Uang
 
   const [trades, setTrades] = useState([]);
   const [pair, setPair] = useState('EURUSD');
@@ -29,13 +30,33 @@ export default function App() {
   const [pnl, setPnl] = useState('');
   const [notes, setNotes] = useState('');
   
-  // Fitur Filter & Search
+  // Fitur Filter Utama (Tabel & Ringkasan)
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterMonth, setFilterMonth] = useState('Semua Bulan');
+  const [filterType, setFilterType] = useState('Semua'); // 'Semua', 'Hari', 'Minggu', 'Bulan', 'Tahun'
+  const [filterValue, setFilterValue] = useState(''); 
+
+  // Fitur Filter Khusus Grafik
+  const [chartPeriod, setChartPeriod] = useState('Semua'); // '1 Minggu', '1 Bulan', '1 Tahun', '3 Tahun', 'Semua'
+
+  // Fungsi Format Mata Uang Otomatis
+  const formatMoney = (val) => {
+    if (currency === 'IDR') {
+      return 'Rp' + Math.abs(val).toLocaleString('id-ID');
+    }
+    return '$' + Math.abs(val).toFixed(2);
+  };
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
+      // Ambil preferensi mata uang dari database jika user login
+      if (currentUser) {
+        const docRef = doc(db, 'users', currentUser.uid);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists() && docSnap.data().currency) {
+          setCurrency(docSnap.data().currency);
+        }
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -56,7 +77,9 @@ export default function App() {
     setAuthError('');
     try {
       if (isRegister) {
-        await createUserWithEmailAndPassword(auth, email, password);
+        const userCred = await createUserWithEmailAndPassword(auth, email, password);
+        // Simpan preferensi mata uang ke database saat daftar
+        await setDoc(doc(db, 'users', userCred.user.uid), { currency: currency });
       } else {
         await signInWithEmailAndPassword(auth, email, password);
       }
@@ -69,7 +92,6 @@ export default function App() {
     e.preventDefault();
     if (!lot || !pnl) return;
 
-    // Menghasilkan string bulan/tahun untuk filter (contoh: "Okt 2023")
     const dateObj = new Date();
     const monthYear = dateObj.toLocaleDateString('id-ID', { month: 'short', year: 'numeric' });
 
@@ -96,18 +118,50 @@ export default function App() {
     }
   };
 
-  // Mendapatkan daftar bulan unik untuk dropdown filter
-  const uniqueMonths = ['Semua Bulan', ...new Set(trades.map(t => t.monthYear).filter(Boolean))];
-
-  // Logika Filtering (Search + Bulan)
+  // Logika Filtering Kalender Profesional
   const filteredTrades = trades.filter(t => {
     const matchSearch = t.pair.toLowerCase().includes(searchTerm.toLowerCase()) || 
                         (t.notes && t.notes.toLowerCase().includes(searchTerm.toLowerCase()));
-    const matchMonth = filterMonth === 'Semua Bulan' || t.monthYear === filterMonth;
-    return matchSearch && matchMonth;
+    
+    let matchTime = true;
+    if (filterType !== 'Semua' && filterValue) {
+      const d = new Date(t.timestamp);
+      if (filterType === 'Hari') {
+        const tDate = d.toLocaleDateString('en-CA'); // format YYYY-MM-DD
+        matchTime = (tDate === filterValue);
+      } else if (filterType === 'Bulan') {
+        const tMonth = d.toLocaleDateString('en-CA').slice(0, 7); // format YYYY-MM
+        matchTime = (tMonth === filterValue);
+      } else if (filterType === 'Tahun') {
+        matchTime = (d.getFullYear().toString() === filterValue);
+      } else if (filterType === 'Minggu') {
+        // Kalkulasi minggu format YYYY-Www
+        const targetD = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+        targetD.setUTCDate(targetD.getUTCDate() + 4 - (targetD.getUTCDay()||7));
+        const yearStart = new Date(Date.UTC(targetD.getUTCFullYear(),0,1));
+        const weekNo = Math.ceil(( ( (targetD - yearStart) / 86400000) + 1)/7);
+        const weekStr = targetD.getUTCFullYear() + "-W" + (weekNo < 10 ? '0'+weekNo : weekNo);
+        matchTime = (weekStr === filterValue);
+      }
+    }
+    return matchSearch && matchTime;
   });
 
-  // Kalkulasi Statistik berdasarkan data yang di-filter (Bukan semua data)
+  // Filter khusus untuk Grafik berdasarkan periode tombol cepat
+  const chartTrades = useMemo(() => {
+    if (chartPeriod === 'Semua') return filteredTrades;
+    const now = new Date().getTime();
+    const periods = {
+      '1 Minggu': 7 * 24 * 60 * 60 * 1000,
+      '1 Bulan': 30 * 24 * 60 * 60 * 1000,
+      '1 Tahun': 365 * 24 * 60 * 60 * 1000,
+      '3 Tahun': 3 * 365 * 24 * 60 * 60 * 1000,
+    };
+    const limit = now - periods[chartPeriod];
+    return filteredTrades.filter(t => t.timestamp >= limit);
+  }, [filteredTrades, chartPeriod]);
+
+  // Kalkulasi Statistik
   const totalPnl = filteredTrades.reduce((acc, item) => acc + item.pnl, 0);
   const totalWin = filteredTrades.filter(t => t.pnl > 0).length;
   const totalLoss = filteredTrades.filter(t => t.pnl < 0).length;
@@ -115,7 +169,7 @@ export default function App() {
 
   const chartData = useMemo(() => {
     let runningBalance = 0;
-    return filteredTrades.map((t, index) => {
+    return chartTrades.map((t, index) => {
       runningBalance += t.pnl;
       return {
         tradeCount: `T${index + 1}`,
@@ -124,24 +178,21 @@ export default function App() {
         pnl: t.pnl
       };
     });
-  }, [filteredTrades]);
+  }, [chartTrades]);
 
   // Fitur EXPORT PDF
   const exportToPDF = () => {
     const doc = new jsPDF();
-    
-    // Header PDF
     doc.setFontSize(20);
-    doc.setTextColor(41, 128, 185); // Warna Biru Profesional
+    doc.setTextColor(41, 128, 185);
     doc.text('STARFX - Laporan Jurnal Perdagangan', 14, 22);
     
     doc.setFontSize(11);
     doc.setTextColor(100);
-    doc.text(`Periode: ${filterMonth}`, 14, 30);
+    doc.text(`Periode Filter: ${filterType === 'Semua' ? 'Keseluruhan Waktu' : filterValue}`, 14, 30);
     doc.text(`Email Trader: ${user.email}`, 14, 36);
     doc.text(`Tanggal Cetak: ${new Date().toLocaleDateString('id-ID')}`, 14, 42);
 
-    // Ringkasan Statistik
     doc.setFontSize(12);
     doc.setTextColor(0);
     doc.text(`Ringkasan Kinerja:`, 14, 52);
@@ -149,23 +200,16 @@ export default function App() {
     doc.text(`Total Transaksi: ${filteredTrades.length} Trades`, 14, 58);
     doc.text(`Win Rate: ${winRate}% (${totalWin} Win / ${totalLoss} Loss)`, 14, 64);
     
-    const pnlText = `Net Profit/Loss: ${totalPnl >= 0 ? '+' : '-'}$${Math.abs(totalPnl).toFixed(2)}`;
-    doc.setTextColor(totalPnl >= 0 ? 39 : 231, totalPnl >= 0 ? 174 : 76, totalPnl >= 0 ? 96 : 60); // Hijau atau Merah
+    const pnlText = `Net Profit/Loss: ${totalPnl >= 0 ? '+' : '-'}${formatMoney(totalPnl)}`;
+    doc.setTextColor(totalPnl >= 0 ? 39 : 231, totalPnl >= 0 ? 174 : 76, totalPnl >= 0 ? 96 : 60);
     doc.text(pnlText, 14, 70);
 
-    // Tabel Data Transaksi
-    const tableColumn = ["Tanggal", "Asset", "Aksi", "Lot", "PnL ($)", "Catatan"];
+    const tableColumn = ["Tanggal", "Asset", "Aksi", "Lot", `PnL (${currency})`, "Catatan"];
     const tableRows = [];
 
     [...filteredTrades].reverse().forEach(trade => {
-      const tradeData = [
-        trade.date,
-        trade.pair,
-        trade.type,
-        trade.lot,
-        trade.pnl >= 0 ? `+${trade.pnl}` : trade.pnl,
-        trade.notes || '-'
-      ];
+      const pnlDisplay = trade.pnl >= 0 ? `+${formatMoney(trade.pnl)}` : `-${formatMoney(trade.pnl)}`;
+      const tradeData = [trade.date, trade.pair, trade.type, trade.lot, pnlDisplay, trade.notes || '-'];
       tableRows.push(tradeData);
     });
 
@@ -178,7 +222,7 @@ export default function App() {
       styles: { fontSize: 9 },
     });
 
-    doc.save(`STARFX_Report_${filterMonth.replace(' ', '_')}.pdf`);
+    doc.save(`STARFX_Report.pdf`);
   };
 
   if (!user) {
@@ -200,6 +244,18 @@ export default function App() {
               <label style={styles.label}>Password</label>
               <input type="password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} required style={styles.input} />
             </div>
+            
+            {/* OPSI MATA UANG SAAT PENDAFTARAN */}
+            {isRegister && (
+              <div style={styles.inputGroup}>
+                <label style={styles.label}>Mata Uang Akun</label>
+                <select value={currency} onChange={e => setCurrency(e.target.value)} style={styles.input}>
+                  <option value="USD">Dolar Amerika (USD $)</option>
+                  <option value="IDR">Rupiah Indonesia (IDR Rp)</option>
+                </select>
+              </div>
+            )}
+
             <button type="submit" style={styles.btnPrimary}>{isRegister ? 'Daftar Sekarang' : 'Login Dashboard'}</button>
           </form>
 
@@ -224,7 +280,7 @@ export default function App() {
         <div style={{display: 'flex', alignItems: 'center', gap: '20px'}}>
           <span style={{fontSize: '13px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '8px'}}>
              <span style={{width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981'}}></span>
-             {user.email}
+             {user.email} | {currency}
           </span>
           <button onClick={() => signOut(auth)} style={styles.btnDanger}>Logout</button>
         </div>
@@ -232,13 +288,25 @@ export default function App() {
 
       <div style={styles.content}>
         
-        {/* Header Control Panel */}
+        {/* Header Control Panel (Diperbarui dengan Filter Profesional) */}
         <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px', flexWrap: 'wrap', gap: '15px'}}>
            <h2 style={{margin: 0, fontWeight: '600', fontSize: '24px'}}>Ikhtisar Kinerja</h2>
-           <div style={{display: 'flex', gap: '15px'}}>
-              <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} style={styles.selectOutline}>
-                {uniqueMonths.map((m, i) => <option key={i} value={m}>{m}</option>)}
+           <div style={{display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap'}}>
+              
+              <select value={filterType} onChange={(e) => {setFilterType(e.target.value); setFilterValue('');}} style={styles.selectOutline}>
+                <option value="Semua">Semua Waktu</option>
+                <option value="Hari">Harian</option>
+                <option value="Minggu">Mingguan</option>
+                <option value="Bulan">Bulanan</option>
+                <option value="Tahun">Tahunan</option>
               </select>
+
+              {/* Input Periode yang Berubah Sesuai Tipe */}
+              {filterType === 'Hari' && <input type="date" value={filterValue} onChange={e => setFilterValue(e.target.value)} style={styles.selectOutline} />}
+              {filterType === 'Minggu' && <input type="week" value={filterValue} onChange={e => setFilterValue(e.target.value)} style={styles.selectOutline} />}
+              {filterType === 'Bulan' && <input type="month" value={filterValue} onChange={e => setFilterValue(e.target.value)} style={styles.selectOutline} />}
+              {filterType === 'Tahun' && <input type="number" placeholder="Tahun (Contoh: 2026)" value={filterValue} onChange={e => setFilterValue(e.target.value)} style={{...styles.selectOutline, width: '130px'}} />}
+
               <button onClick={exportToPDF} style={styles.btnExport}>
                 📄 Unduh Laporan PDF
               </button>
@@ -251,7 +319,7 @@ export default function App() {
             <div style={styles.cardIconBox}><span style={{fontSize: '20px'}}>💰</span></div>
             <span style={styles.cardTitle}>Net Profit / Loss</span>
             <h2 style={{color: totalPnl >= 0 ? '#34d399' : '#fb7185', margin: '10px 0 5px 0', fontSize: '32px', fontWeight: '700'}}>
-              {totalPnl >= 0 ? '+' : '-'}${Math.abs(totalPnl).toFixed(2)}
+              {totalPnl >= 0 ? '+' : '-'}{formatMoney(totalPnl)}
             </h2>
             <span style={{fontSize: '12px', color: '#64748b'}}>Dari {filteredTrades.length} total transaksi</span>
           </div>
@@ -274,20 +342,33 @@ export default function App() {
         </div>
 
         {/* Chart Section */}
-        <div style={{...styles.card, marginBottom: '25px', height: '380px', padding: '30px'}}>
-          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px'}}>
-             <h4 style={{color: '#f8fafc', fontWeight: '600', margin: 0, fontSize: '16px'}}>📈 Pertumbuhan Akun (Kumulatif)</h4>
-             <span style={{fontSize: '12px', color: '#64748b', background: '#1e293b', padding: '4px 10px', borderRadius: '20px'}}>Periode: {filterMonth}</span>
+        <div style={{...styles.card, marginBottom: '25px', height: '420px', padding: '30px'}}>
+          
+          {/* Menu Periode Khusus Chart */}
+          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap'}}>
+             <h4 style={{color: '#f8fafc', fontWeight: '600', margin: 0, fontSize: '16px'}}>📈 Pertumbuhan Akun</h4>
+             
+             <div style={{display: 'flex', gap: '5px', background: '#020617', padding: '5px', borderRadius: '8px'}}>
+                {['1 Minggu', '1 Bulan', '1 Tahun', '3 Tahun', 'Semua'].map(p => (
+                   <button 
+                      key={p} 
+                      onClick={() => setChartPeriod(p)} 
+                      style={{...styles.chartBtn, background: chartPeriod === p ? '#38bdf8' : 'transparent', color: chartPeriod === p ? '#020617' : '#94a3b8'}}
+                   >
+                      {p}
+                   </button>
+                ))}
+             </div>
           </div>
           
-          {filteredTrades.length === 0 ? (
-             <div style={{height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column'}}>
+          {chartTrades.length === 0 ? (
+             <div style={{height: '80%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column'}}>
                 <span style={{fontSize: '40px', opacity: 0.5}}>📊</span>
-                <p style={{color: '#64748b', fontSize: '14px', marginTop: '15px'}}>Belum ada data untuk periode ini.</p>
+                <p style={{color: '#64748b', fontSize: '14px', marginTop: '15px'}}>Belum ada data untuk periode grafik ini.</p>
              </div>
           ) : (
-            <ResponsiveContainer width="100%" height="85%">
-              <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+            <ResponsiveContainer width="100%" height="80%">
+              <AreaChart data={chartData} margin={{ top: 10, right: 10, left: currency === 'IDR' ? 10 : -20, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorBalance" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#38bdf8" stopOpacity={0.4}/>
@@ -296,7 +377,7 @@ export default function App() {
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                 <XAxis dataKey="tradeCount" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-                <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => `$${value}`} />
+                <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => formatMoney(value)} />
                 <Tooltip 
                    contentStyle={{backgroundColor: 'rgba(15, 23, 42, 0.9)', backdropFilter: 'blur(5px)', border: '1px solid #334155', borderRadius: '12px', color: '#fff', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)'}} 
                    itemStyle={{color: '#38bdf8', fontWeight: 'bold'}} 
@@ -355,8 +436,8 @@ export default function App() {
                   <input type="number" step="0.01" placeholder="0.10" value={lot} onChange={e => setLot(e.target.value)} required style={styles.input} />
                 </div>
                 <div style={{flex: 1, ...styles.inputGroup}}>
-                  <label style={styles.label}>Hasil PnL ($)</label>
-                  <input type="number" step="0.01" placeholder="50 / -20" value={pnl} onChange={e => setPnl(e.target.value)} required style={{...styles.input, color: pnl > 0 ? '#34d399' : pnl < 0 ? '#fb7185' : '#f8fafc'}} />
+                  <label style={styles.label}>Hasil PnL ({currency})</label>
+                  <input type="number" step="0.01" placeholder={currency === 'IDR' ? "500000" : "50.00"} value={pnl} onChange={e => setPnl(e.target.value)} required style={{...styles.input, color: pnl > 0 ? '#34d399' : pnl < 0 ? '#fb7185' : '#f8fafc'}} />
                 </div>
               </div>
 
@@ -389,7 +470,7 @@ export default function App() {
                     <th style={styles.th}>Lot</th>
                     <th style={styles.th}>PnL</th>
                     <th style={styles.th}>Catatan</th>
-                    <th style={styles.th}></th>
+                    <th style={styles.th}>Aksi</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -409,17 +490,21 @@ export default function App() {
                               padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold',
                               background: item.type === 'BUY' ? 'rgba(56, 189, 248, 0.1)' : 'rgba(251, 113, 133, 0.1)',
                               color: item.type === 'BUY' ? '#38bdf8' : '#fb7185'
-                           }}>{item.type}</span>
+                           }}>
+                             {item.type}
+                           </span>
                         </td>
                         <td style={styles.td}>{item.lot}</td>
-                        <td style={{...styles.td, color: item.pnl >= 0 ? '#34d399' : '#fb7185', fontWeight: '600'}}>
-                          {item.pnl >= 0 ? `+$${item.pnl}` : `-$${Math.abs(item.pnl)}`}
+                        <td style={{...styles.td, color: item.pnl >= 0 ? '#34d399' : '#fb7185', fontWeight: 'bold'}}>
+                          {item.pnl >= 0 ? '+' : '-'}{formatMoney(item.pnl)}
                         </td>
-                        <td style={{...styles.td, color: '#94a3b8', fontSize: '12px', maxWidth: '140px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}} title={item.notes}>
+                        <td style={{...styles.td, color: '#94a3b8', maxWidth: '150px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>
                           {item.notes || '-'}
                         </td>
                         <td style={styles.td}>
-                          <button onClick={() => handleDelete(item.id)} style={styles.btnDelete} title="Hapus">🗑️</button>
+                           <button onClick={() => handleDelete(item.id)} style={{background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '14px', opacity: 0.7}}>
+                             🗑️
+                           </button>
                         </td>
                       </tr>
                     ))
@@ -434,51 +519,37 @@ export default function App() {
   );
 }
 
-// --- PENGATURAN GAYA / STYLES (Professional Dark Glassmorphism) ---
 const styles = {
-  // Auth Styles
-  authContainer: { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#0f172a', backgroundImage: 'radial-gradient(circle at top right, #1e1b4b, #0f172a)', fontFamily: "'Inter', sans-serif" },
-  authCard: { position: 'relative', width: '100%', maxWidth: '400px', padding: '40px', backgroundColor: 'rgba(30, 41, 59, 0.7)', backdropFilter: 'blur(16px)', borderRadius: '24px', border: '1px solid rgba(255,255,255,0.1)', color: '#f8fafc', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)', textAlign: 'center', overflow: 'hidden' },
-  glowCircle: { position: 'absolute', top: '-50px', right: '-50px', width: '150px', height: '150px', background: '#38bdf8', filter: 'blur(80px)', opacity: 0.3, zIndex: -1 },
-  brandTitle: { color: '#38bdf8', letterSpacing: '2px', marginBottom: '8px', fontWeight: '800', fontSize: '26px' },
-  subTitle: { color: '#94a3b8', fontSize: '14px', marginBottom: '30px' },
-  form: { display: 'flex', flexDirection: 'column', gap: '18px', textAlign: 'left' },
-  
-  // Forms & Inputs
-  inputGroup: { display: 'flex', flexDirection: 'column', gap: '6px' },
-  label: { fontSize: '12px', color: '#94a3b8', fontWeight: '600', letterSpacing: '0.5px', textTransform: 'uppercase' },
-  input: { padding: '12px 14px', borderRadius: '10px', border: '1px solid #334155', backgroundColor: 'rgba(15, 23, 42, 0.6)', color: '#f8fafc', outline: 'none', width: '100%', boxSizing: 'border-box', fontSize: '14px', transition: 'border 0.3s' },
-  selectOutline: { padding: '8px 14px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#1e293b', color: '#f8fafc', outline: 'none', cursor: 'pointer', fontSize: '13px' },
-  toggleBtn: { flex: 1, padding: '10px', borderRadius: '10px', border: '1px solid', cursor: 'pointer', fontWeight: '600', transition: '0.2s', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '5px' },
-  
-  // Buttons
-  btnPrimary: { padding: '14px', borderRadius: '10px', border: 'none', backgroundColor: '#0ea5e9', color: '#fff', fontWeight: '600', fontSize: '15px', cursor: 'pointer', width: '100%', transition: 'background 0.3s', boxShadow: '0 4px 14px 0 rgba(14, 165, 233, 0.39)' },
-  btnGradient: { padding: '14px', borderRadius: '10px', border: 'none', background: 'linear-gradient(to right, #0ea5e9, #8b5cf6)', color: '#fff', fontWeight: '600', fontSize: '14px', cursor: 'pointer', width: '100%', transition: 'opacity 0.3s', marginTop: '10px', boxShadow: '0 4px 15px rgba(139, 92, 246, 0.4)' },
-  btnExport: { padding: '8px 16px', borderRadius: '8px', border: 'none', background: '#34d399', color: '#064e3b', fontWeight: '600', fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', boxShadow: '0 4px 10px rgba(52, 211, 153, 0.2)' },
-  btnDanger: { padding: '8px 16px', borderRadius: '8px', border: '1px solid rgba(239, 68, 68, 0.3)', backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#fca5a5', cursor: 'pointer', fontSize: '12px', fontWeight: '600', transition: '0.2s' },
-  btnDelete: { background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', opacity: 0.6, transition: '0.2s' },
-  
-  // Misc
-  switchAuth: { marginTop: '25px', fontSize: '13px', color: '#94a3b8', textAlign: 'center' },
-  link: { color: '#38bdf8', cursor: 'pointer', fontWeight: '600', textDecoration: 'underline' },
-  errorBox: { backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#fca5a5', border: '1px solid rgba(239,68,68,0.3)', padding: '12px', borderRadius: '8px', fontSize: '13px', marginBottom: '20px' },
-  
-  // Dashboard Layout
-  dashboard: { minHeight: '100vh', backgroundColor: '#0f172a', color: '#f8fafc', fontFamily: "'Inter', sans-serif" },
-  nav: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 40px', backgroundColor: 'rgba(15, 23, 42, 0.8)', backdropFilter: 'blur(10px)', borderBottom: '1px solid #1e293b', position: 'sticky', top: 0, zIndex: 10 },
-  content: { padding: '40px', maxWidth: '1300px', margin: '0 auto' },
-  
-  // Cards & Grid
+  authContainer: { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#0f172a' },
+  authCard: { background: '#1e293b', padding: '40px', borderRadius: '16px', width: '350px', textAlign: 'center', position: 'relative', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)' },
+  glowCircle: { position: 'absolute', top: '-50px', right: '-50px', width: '100px', height: '100px', background: '#38bdf8', filter: 'blur(60px)', borderRadius: '50%' },
+  brandTitle: { color: '#38bdf8', margin: '0 0 5px 0', fontSize: '24px' },
+  subTitle: { color: '#94a3b8', fontSize: '14px', marginBottom: '25px' },
+  errorBox: { background: 'rgba(251, 113, 133, 0.1)', color: '#fb7185', padding: '10px', borderRadius: '8px', marginBottom: '15px', fontSize: '13px' },
+  form: { display: 'flex', flexDirection: 'column', gap: '15px' },
+  inputGroup: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '5px' },
+  label: { color: '#94a3b8', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase' },
+  input: { width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #334155', background: '#0f172a', color: '#f8fafc', boxSizing: 'border-box' },
+  btnPrimary: { background: '#38bdf8', color: '#0f172a', padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px' },
+  switchAuth: { color: '#64748b', fontSize: '13px', marginTop: '20px' },
+  link: { color: '#38bdf8', cursor: 'pointer', fontWeight: 'bold' },
+  dashboard: { minHeight: '100vh', backgroundColor: '#0f172a', color: '#f8fafc', padding: '20px', boxSizing: 'border-box', fontFamily: 'system-ui, -apple-system, sans-serif' },
+  nav: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#1e293b', padding: '15px 25px', borderRadius: '16px', marginBottom: '25px' },
+  btnDanger: { background: 'rgba(251, 113, 133, 0.1)', color: '#fb7185', border: '1px solid #fb7185', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' },
+  content: { maxWidth: '1200px', margin: '0 auto' },
+  selectOutline: { background: '#1e293b', color: '#f8fafc', border: '1px solid #334155', padding: '8px 12px', borderRadius: '8px', outline: 'none', fontSize: '14px' },
+  btnExport: { background: '#10b981', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' },
   statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', marginBottom: '25px' },
-  card: { backgroundColor: '#1e293b', padding: '25px', borderRadius: '16px', border: '1px solid rgba(255,255,255,0.05)', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3)', position: 'relative', overflow: 'hidden' },
-  cardIconBox: { position: 'absolute', top: '25px', right: '25px', width: '40px', height: '40px', borderRadius: '12px', background: 'rgba(52, 211, 153, 0.1)', display: 'flex', justifyContent: 'center', alignItems: 'center' },
-  cardTitle: { fontSize: '13px', color: '#94a3b8', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px' },
-  mainGrid: { display: 'grid', gridTemplateColumns: '1fr 2.2fr', gap: '25px', alignItems: 'start' },
-  
-  // Table
-  table: { width: '100%', borderCollapse: 'collapse', fontSize: '13px' },
-  th: { padding: '15px 12px', color: '#94a3b8', fontWeight: '600', textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.5px', borderBottom: '1px solid #1e293b' },
-  td: { padding: '15px 12px', borderBottom: '1px solid #1e293b' },
-  trHover: { transition: 'background-color 0.2s', cursor: 'default' },
-  badge: { backgroundColor: '#334155', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', color: '#f8fafc', fontWeight: '500' }
+  card: { background: '#1e293b', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' },
+  cardIconBox: { background: 'rgba(250, 204, 21, 0.1)', width: '40px', height: '40px', borderRadius: '10px', display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: '15px' },
+  cardTitle: { color: '#94a3b8', fontSize: '13px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '1px' },
+  mainGrid: { display: 'grid', gridTemplateColumns: '1fr 2.5fr', gap: '20px' },
+  toggleBtn: { flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid', cursor: 'pointer', fontWeight: 'bold' },
+  btnGradient: { background: 'linear-gradient(135deg, #38bdf8, #8b5cf6)', color: '#fff', border: 'none', padding: '12px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', marginTop: '10px' },
+  table: { width: '100%', borderCollapse: 'collapse' },
+  th: { padding: '12px 15px', color: '#94a3b8', fontSize: '12px', fontWeight: '600', borderBottom: '1px solid #1e293b' },
+  td: { padding: '15px', borderBottom: '1px solid #1e293b', fontSize: '13px' },
+  trHover: { transition: 'background 0.2s' },
+  badge: { background: '#334155', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', color: '#e2e8f0' },
+  chartBtn: { border: 'none', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }
 };
