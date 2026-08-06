@@ -5,7 +5,7 @@ import {
 import { 
   getFirestore, collection, addDoc, query, where, onSnapshot, deleteDoc, doc, setDoc, getDoc 
 } from 'firebase/firestore';
-import { db } from './firebase'; // Pastikan path ini sesuai dengan file firebase Anda
+import { db } from './firebase'; 
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Area, AreaChart 
 } from 'recharts';
@@ -21,7 +21,7 @@ export default function App() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [authError, setAuthError] = useState('');
-  const [currency, setCurrency] = useState('USD'); // State Mata Uang
+  const [currency, setCurrency] = useState('USD'); 
 
   const [trades, setTrades] = useState([]);
   const [pair, setPair] = useState('EURUSD');
@@ -30,15 +30,12 @@ export default function App() {
   const [pnl, setPnl] = useState('');
   const [notes, setNotes] = useState('');
   
-  // Fitur Filter Utama (Tabel & Ringkasan)
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterType, setFilterType] = useState('Semua'); // 'Semua', 'Hari', 'Minggu', 'Bulan', 'Tahun'
+  const [filterType, setFilterType] = useState('Semua'); 
   const [filterValue, setFilterValue] = useState(''); 
 
-  // Fitur Filter Khusus Grafik
-  const [chartPeriod, setChartPeriod] = useState('Semua'); // '1 Minggu', '1 Bulan', '1 Tahun', '3 Tahun', 'Semua'
+  const [chartPeriod, setChartPeriod] = useState('Semua'); 
 
-  // Fungsi Format Mata Uang Otomatis
   const formatMoney = (val) => {
     if (currency === 'IDR') {
       return 'Rp' + Math.abs(val).toLocaleString('id-ID');
@@ -49,7 +46,6 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
-      // Ambil preferensi mata uang dari database jika user login
       if (currentUser) {
         const docRef = doc(db, 'users', currentUser.uid);
         const docSnap = await getDoc(docRef);
@@ -78,7 +74,6 @@ export default function App() {
     try {
       if (isRegister) {
         const userCred = await createUserWithEmailAndPassword(auth, email, password);
-        // Simpan preferensi mata uang ke database saat daftar
         await setDoc(doc(db, 'users', userCred.user.uid), { currency: currency });
       } else {
         await signInWithEmailAndPassword(auth, email, password);
@@ -118,7 +113,6 @@ export default function App() {
     }
   };
 
-  // Logika Filtering Kalender Profesional
   const filteredTrades = trades.filter(t => {
     const matchSearch = t.pair.toLowerCase().includes(searchTerm.toLowerCase()) || 
                         (t.notes && t.notes.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -127,15 +121,14 @@ export default function App() {
     if (filterType !== 'Semua' && filterValue) {
       const d = new Date(t.timestamp);
       if (filterType === 'Hari') {
-        const tDate = d.toLocaleDateString('en-CA'); // format YYYY-MM-DD
+        const tDate = d.toLocaleDateString('en-CA');
         matchTime = (tDate === filterValue);
       } else if (filterType === 'Bulan') {
-        const tMonth = d.toLocaleDateString('en-CA').slice(0, 7); // format YYYY-MM
+        const tMonth = d.toLocaleDateString('en-CA').slice(0, 7);
         matchTime = (tMonth === filterValue);
       } else if (filterType === 'Tahun') {
         matchTime = (d.getFullYear().toString() === filterValue);
       } else if (filterType === 'Minggu') {
-        // Kalkulasi minggu format YYYY-Www
         const targetD = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
         targetD.setUTCDate(targetD.getUTCDate() + 4 - (targetD.getUTCDay()||7));
         const yearStart = new Date(Date.UTC(targetD.getUTCFullYear(),0,1));
@@ -147,7 +140,6 @@ export default function App() {
     return matchSearch && matchTime;
   });
 
-  // Filter khusus untuk Grafik berdasarkan periode tombol cepat
   const chartTrades = useMemo(() => {
     if (chartPeriod === 'Semua') return filteredTrades;
     const now = new Date().getTime();
@@ -161,7 +153,6 @@ export default function App() {
     return filteredTrades.filter(t => t.timestamp >= limit);
   }, [filteredTrades, chartPeriod]);
 
-  // Kalkulasi Statistik
   const totalPnl = filteredTrades.reduce((acc, item) => acc + item.pnl, 0);
   const totalWin = filteredTrades.filter(t => t.pnl > 0).length;
   const totalLoss = filteredTrades.filter(t => t.pnl < 0).length;
@@ -170,17 +161,18 @@ export default function App() {
   const chartData = useMemo(() => {
     let runningBalance = 0;
     return chartTrades.map((t, index) => {
-      runningBalance += t.pnl;
+      runningBalance += parseFloat(t.pnl);
+      // Membulatkan desimal agar rapi dan menghilangkan error angka panjang
+      const roundedBalance = Math.round(runningBalance * 100) / 100;
       return {
         tradeCount: `T${index + 1}`,
-        balance: runningBalance,
+        balance: roundedBalance,
         pair: t.pair,
         pnl: t.pnl
       };
     });
   }, [chartTrades]);
 
-  // Fitur EXPORT PDF
   const exportToPDF = () => {
     const doc = new jsPDF();
     doc.setFontSize(20);
@@ -245,7 +237,6 @@ export default function App() {
               <input type="password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} required style={styles.input} />
             </div>
             
-            {/* OPSI MATA UANG SAAT PENDAFTARAN */}
             {isRegister && (
               <div style={styles.inputGroup}>
                 <label style={styles.label}>Mata Uang Akun</label>
@@ -288,7 +279,6 @@ export default function App() {
 
       <div style={styles.content}>
         
-        {/* Header Control Panel (Diperbarui dengan Filter Profesional) */}
         <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px', flexWrap: 'wrap', gap: '15px'}}>
            <h2 style={{margin: 0, fontWeight: '600', fontSize: '24px'}}>Ikhtisar Kinerja</h2>
            <div style={{display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap'}}>
@@ -301,7 +291,6 @@ export default function App() {
                 <option value="Tahun">Tahunan</option>
               </select>
 
-              {/* Input Periode yang Berubah Sesuai Tipe */}
               {filterType === 'Hari' && <input type="date" value={filterValue} onChange={e => setFilterValue(e.target.value)} style={styles.selectOutline} />}
               {filterType === 'Minggu' && <input type="week" value={filterValue} onChange={e => setFilterValue(e.target.value)} style={styles.selectOutline} />}
               {filterType === 'Bulan' && <input type="month" value={filterValue} onChange={e => setFilterValue(e.target.value)} style={styles.selectOutline} />}
@@ -313,7 +302,6 @@ export default function App() {
            </div>
         </div>
 
-        {/* Stats Section */}
         <div style={styles.statsGrid}>
           <div style={styles.card}>
             <div style={styles.cardIconBox}><span style={{fontSize: '20px'}}>💰</span></div>
@@ -341,10 +329,7 @@ export default function App() {
           </div>
         </div>
 
-        {/* Chart Section */}
         <div style={{...styles.card, marginBottom: '25px', height: '420px', padding: '30px'}}>
-          
-          {/* Menu Periode Khusus Chart */}
           <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap'}}>
              <h4 style={{color: '#f8fafc', fontWeight: '600', margin: 0, fontSize: '16px'}}>📈 Pertumbuhan Akun</h4>
              
@@ -379,6 +364,7 @@ export default function App() {
                 <XAxis dataKey="tradeCount" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
                 <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => formatMoney(value)} />
                 <Tooltip 
+                   formatter={(value) => [(value >= 0 ? '+' : '-') + formatMoney(value), "Total Saldo"]}
                    contentStyle={{backgroundColor: 'rgba(15, 23, 42, 0.9)', backdropFilter: 'blur(5px)', border: '1px solid #334155', borderRadius: '12px', color: '#fff', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)'}} 
                    itemStyle={{color: '#38bdf8', fontWeight: 'bold'}} 
                 />
@@ -389,10 +375,9 @@ export default function App() {
           )}
         </div>
 
-        {/* Input & Table Section */}
         <div style={styles.mainGrid}>
-          {/* Input Form */}
-          <div style={{...styles.card, height: 'fit-content'}}>
+          {/* Input Form Card */}
+          <div style={{...styles.card, height: 'fit-content', flex: '1 1 300px'}}>
             <div style={{display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px'}}>
                <span style={{background: '#1e293b', padding: '8px', borderRadius: '8px', fontSize: '16px'}}>✍️</span>
                <h4 style={{color: '#f8fafc', fontWeight: '600', margin: 0}}>Input Jurnal</h4>
@@ -420,7 +405,7 @@ export default function App() {
 
               <div style={styles.inputGroup}>
                 <label style={styles.label}>Jenis Posisi</label>
-                <div style={{display: 'flex', gap: '10px'}}>
+                <div style={{display: 'flex', gap: '10px', width: '100%'}}>
                   <button type="button" onClick={() => setType('BUY')} style={{...styles.toggleBtn, background: type === 'BUY' ? 'rgba(56, 189, 248, 0.1)' : 'transparent', color: type === 'BUY' ? '#38bdf8' : '#64748b', borderColor: type === 'BUY' ? '#38bdf8' : '#334155'}}>
                     📈 BUY
                   </button>
@@ -450,8 +435,8 @@ export default function App() {
             </form>
           </div>
 
-          {/* Table */}
-          <div style={{...styles.card, display: 'flex', flexDirection: 'column'}}>
+          {/* Table Card with Scroll */}
+          <div style={{...styles.card, display: 'flex', flexDirection: 'column', flex: '2 1 500px'}}>
             <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px'}}>
               <h4 style={{color: '#f8fafc', fontWeight: '600', margin: 0}}>📋 Riwayat Trading</h4>
               <div style={{position: 'relative'}}>
@@ -460,17 +445,18 @@ export default function App() {
               </div>
             </div>
 
-            <div style={{overflowX: 'auto', borderRadius: '8px', border: '1px solid #1e293b'}}>
+            {/* Area Tabel dengan Scrollbar Dalam */}
+            <div style={{overflowX: 'auto', overflowY: 'auto', maxHeight: '450px', borderRadius: '8px', border: '1px solid #1e293b'}}>
               <table style={styles.table}>
                 <thead>
-                  <tr style={{backgroundColor: '#020617', textAlign: 'left'}}>
-                    <th style={styles.th}>Waktu</th>
-                    <th style={styles.th}>Asset</th>
-                    <th style={styles.th}>Posisi</th>
-                    <th style={styles.th}>Lot</th>
-                    <th style={styles.th}>PnL</th>
-                    <th style={styles.th}>Catatan</th>
-                    <th style={styles.th}>Aksi</th>
+                  <tr style={{textAlign: 'left'}}>
+                    <th style={{...styles.th, position: 'sticky', top: 0, backgroundColor: '#020617', zIndex: 1}}>Waktu</th>
+                    <th style={{...styles.th, position: 'sticky', top: 0, backgroundColor: '#020617', zIndex: 1}}>Asset</th>
+                    <th style={{...styles.th, position: 'sticky', top: 0, backgroundColor: '#020617', zIndex: 1}}>Posisi</th>
+                    <th style={{...styles.th, position: 'sticky', top: 0, backgroundColor: '#020617', zIndex: 1}}>Lot</th>
+                    <th style={{...styles.th, position: 'sticky', top: 0, backgroundColor: '#020617', zIndex: 1}}>PnL</th>
+                    <th style={{...styles.th, position: 'sticky', top: 0, backgroundColor: '#020617', zIndex: 1}}>Catatan</th>
+                    <th style={{...styles.th, position: 'sticky', top: 0, backgroundColor: '#020617', zIndex: 1}}>Aksi</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -543,7 +529,7 @@ const styles = {
   card: { background: '#1e293b', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' },
   cardIconBox: { background: 'rgba(250, 204, 21, 0.1)', width: '40px', height: '40px', borderRadius: '10px', display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: '15px' },
   cardTitle: { color: '#94a3b8', fontSize: '13px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '1px' },
-  mainGrid: { display: 'grid', gridTemplateColumns: '1fr 2.5fr', gap: '20px' },
+  mainGrid: { display: 'flex', flexWrap: 'wrap', gap: '20px' }, // Diubah agar responsif di HP
   toggleBtn: { flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid', cursor: 'pointer', fontWeight: 'bold' },
   btnGradient: { background: 'linear-gradient(135deg, #38bdf8, #8b5cf6)', color: '#fff', border: 'none', padding: '12px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', marginTop: '10px' },
   table: { width: '100%', borderCollapse: 'collapse' },
