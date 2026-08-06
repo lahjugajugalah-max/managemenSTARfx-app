@@ -11,25 +11,25 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: 18
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Build web assets
         run: npm run build
 
-      - name: Setup Capacitor & Android
+      - name: Setup Capacitor
         run: |
-          npx cap init STARFX com.starfx.app --web-dir dist
           npm install @capacitor/core @capacitor/cli @capacitor/android
-          npx cap add android
-          npx cap sync android
+          npx cap init STARFX com.starfx.app --web-dir dist || true
+          npx cap add android || true
+          npx cap copy android || true
 
       - name: Setup Java JDK
         uses: actions/setup-java@v3
@@ -39,11 +39,17 @@ jobs:
 
       - name: Build APK with Gradle
         run: |
-          cd android
-          ./gradlew assembleDebug
+          if [ -d "android" ]; then
+            cd android
+            chmod +x gradlew
+            ./gradlew assembleDebug
+          else
+            echo "Folder android tidak ditemukan"
+            exit 1
+          fi
 
       - name: Upload APK Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: STARFX-App
           path: android/app/build/outputs/apk/debug/app-debug.apk
