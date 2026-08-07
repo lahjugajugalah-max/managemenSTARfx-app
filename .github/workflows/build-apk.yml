@@ -27,9 +27,25 @@ jobs:
       - name: Setup Capacitor & Generate App Icon
         run: |
           npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/assets
-          npx cap init STARFX com.starfx.app --web-dir dist || true
+          
+          # Hapus config lama yang bikin error
+          rm -f capacitor.config.ts capacitor.config.js capacitor.config.json
+          
+          # Bikin config baru yang 100% aman dan langsung jalan
+          cat <<EOF > capacitor.config.json
+          {
+            "appId": "com.starfx.app",
+            "appName": "STARFX",
+            "webDir": "dist",
+            "bundledWebRuntime": false
+          }
+          EOF
+          
+          # Paksa bikin folder dist dan android
+          mkdir -p dist
           npx cap add android
           
+          # Atur urusan Logo (icon.png)
           if [ -f "icon.png" ]; then
             mkdir -p assets
             cp icon.png assets/icon.png
