@@ -28,15 +28,18 @@ jobs:
         run: |
           npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/assets
           npx cap init STARFX com.starfx.app --web-dir dist || true
-          npx cap add android || true
+          npx cap add android
+          
           if [ -f "icon.png" ]; then
             mkdir -p assets
             cp icon.png assets/icon.png
           fi
+          
           if [ -f "assets/icon.png" ]; then
-            npx @capacitor/assets generate --android
+            npx @capacitor/assets generate --android || true
           fi
-          npx cap copy android || true
+          
+          npx cap sync android || true
 
       - name: Setup Java JDK
         uses: actions/setup-java@v3
