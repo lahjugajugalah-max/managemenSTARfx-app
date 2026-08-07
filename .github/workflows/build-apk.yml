@@ -40,17 +40,16 @@ jobs:
       - name: Fix Kotlin Duplicate Class Error
         run: |
           if [ -f "android/build.gradle" ]; then
-            cat <<EOF >> android/build.gradle
-            allprojects {
-                configurations.all {
-                    resolutionStrategy {
-                        force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
-                        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'
-                        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'
-                    }
-                }
-            }
-            EOF
+            echo "" >> android/build.gradle
+            echo "allprojects {" >> android/build.gradle
+            echo "    configurations.all {" >> android/build.gradle
+            echo "        resolutionStrategy {" >> android/build.gradle
+            echo "            force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'" >> android/build.gradle
+            echo "            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'" >> android/build.gradle
+            echo "            force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'" >> android/build.gradle
+            echo "        }" >> android/build.gradle
+            echo "    }" >> android/build.gradle
+            echo "}" >> android/build.gradle
           fi
 
       - name: Build APK with Gradle
