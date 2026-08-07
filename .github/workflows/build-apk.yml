@@ -37,6 +37,22 @@ jobs:
           distribution: 'zulu'
           java-version: '21'
 
+      - name: Fix Kotlin Duplicate Class Error
+        run: |
+          if [ -f "android/build.gradle" ]; then
+            cat <<EOF >> android/build.gradle
+            allprojects {
+                configurations.all {
+                    resolutionStrategy {
+                        force 'org.jetbrains.kotlin:kotlin-stdlib:1.8.22'
+                        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.8.22'
+                        force 'org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.8.22'
+                    }
+                }
+            }
+            EOF
+          fi
+
       - name: Build APK with Gradle
         run: |
           if [ -d "android" ]; then
