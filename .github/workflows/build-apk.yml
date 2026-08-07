@@ -24,11 +24,18 @@ jobs:
       - name: Build web assets
         run: npm run build
 
-      - name: Setup Capacitor
+      - name: Setup Capacitor & Generate App Icon
         run: |
-          npm install @capacitor/core @capacitor/cli @capacitor/android
+          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/assets
           npx cap init STARFX com.starfx.app --web-dir dist || true
           npx cap add android || true
+          if [ -f "icon.png" ]; then
+            mkdir -p assets
+            cp icon.png assets/icon.png
+          fi
+          if [ -f "assets/icon.png" ]; then
+            npx @capacitor/assets generate --android
+          fi
           npx cap copy android || true
 
       - name: Setup Java JDK
