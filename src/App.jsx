@@ -33,6 +33,9 @@ export default function App() {
 
   // Tab Navigasi Bawah
   const [activeTab, setActiveTab] = useState('dashboard');
+  
+  // State untuk expand card history
+  const [expandedTrade, setExpandedTrade] = useState(null);
 
   // State Transaksi
   const [trades, setTrades] = useState([]);
@@ -112,30 +115,64 @@ export default function App() {
       alert("Field wajib (Lot, PnL, Entry Price, Exit Price, Tanggal, Waktu) harus diisi!");
       return;
     }
-    const dateObj = new Date(`${date}T${time}`);
-    await addDoc(collection(db, 'forex_trades'), {
-      userId: user.uid,
-      pair, type, lot: parseFloat(lot), 
-      entryPrice: parseFloat(entryPrice),
-      stopLoss: stopLoss ? parseFloat(stopLoss) : null,
-      takeProfit: takeProfit ? parseFloat(takeProfit) : null,
-      exitPrice: parseFloat(exitPrice),
-      pnl: parseFloat(pnl), 
-      commission: commission ? parseFloat(commission) : null,
-      swap: swap ? parseFloat(swap) : null,
-      broker: broker || null,
-      notes, strategy,
-      date: dateObj.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }),
-      timestamp: dateObj.getTime()
-    });
-    // Reset Form
-    setLot(''); setEntryPrice(''); setStopLoss(''); setTakeProfit(''); setExitPrice(''); setPnl(''); setCommission(''); setSwap(''); setBroker(''); setNotes('');
-    alert('Transaksi berhasil disimpan!');
-    setActiveTab('dashboard'); // Kembali ke dashboard
+    
+    try {
+      const dateObj = new Date(`${date}T${time}`);
+      await addDoc(collection(db, 'forex_trades'), {
+        userId: user.uid,
+        pair, type, lot: parseFloat(lot), 
+        entryPrice: parseFloat(entryPrice),
+        stopLoss: stopLoss ? parseFloat(stopLoss) : null,
+        takeProfit: takeProfit ? parseFloat(takeProfit) : null,
+        exitPrice: parseFloat(exitPrice),
+        pnl: parseFloat(pnl), 
+        commission: commission ? parseFloat(commission) : null,
+        swap: swap ? parseFloat(swap) : null,
+        broker: broker || null,
+        notes, strategy,
+        date: dateObj.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }),
+        timestamp: dateObj.getTime()
+      });
+      
+      // Reset Form
+      setLot(''); setEntryPrice(''); setStopLoss(''); setTakeProfit(''); setExitPrice(''); setPnl(''); setCommission(''); setSwap(''); setBroker(''); setNotes('');
+      alert('Transaksi berhasil disimpan!');
+      setActiveTab('transaksi'); // Pindah ke history agar terlihat datanya
+    } catch (error) {
+      alert("Gagal menyimpan data, periksa koneksi internet/Firebase: " + error.message);
+    }
   };
 
-  const handleDelete = async (id) => {
-    if(window.confirm("Yakin ingin menghapus jurnal ini?")) await deleteDoc(doc(db, 'forex_trades', id));
+  const handleDelete = async (e, id) => {
+    e.stopPropagation(); // Mencegah card terbuka saat tombol hapus ditekan
+    if(window.confirm("Yakin ingin menghapus jurnal ini?")) {
+      try {
+        await deleteDoc(doc(db, 'forex_trades', id));
+      } catch (error) {
+        alert("Gagal menghapus: " + error.message);
+      }
+    }
+  };
+
+  // Fungsi Export Data (Menghidupkan tombol fitur Export)
+  const handleExport = () => {
+    if (trades.length === 0) {
+      alert("Belum ada data untuk di-export.");
+      return;
+    }
+    let csvContent = "data:text/csv;charset=utf-8,";
+    csvContent += "Tanggal,Pair,Tipe,Lot,Entry,Exit,PnL,Strategy,Notes\n";
+    trades.forEach(t => {
+      let row = `${t.date},${t.pair},${t.type},${t.lot},${t.entryPrice},${t.exitPrice},${t.pnl},${t.strategy || ''},${t.notes || ''}`;
+      csvContent += row + "\n";
+    });
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "Jurnal_STARFX.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const filteredTrades = trades.filter(t => {
@@ -272,8 +309,8 @@ export default function App() {
             {/* Quick Actions */}
             <div style={styles.quickActions}>
                <button style={styles.actionBtn} onClick={() => setActiveTab('tambah')}><FiPlusCircle /> Tambah</button>
-               <button style={styles.actionBtn}><FiList /> Export</button>
-               <button style={styles.actionBtn}><FiSearch /> Filter</button>
+               <button style={styles.actionBtn} onClick={handleExport}><FiList /> Export</button>
+               <button style={styles.actionBtn} onClick={() => setActiveTab('transaksi')}><FiSearch /> Filter</button>
             </div>
 
             {/* 4 Cards Grid */}
@@ -363,13 +400,17 @@ export default function App() {
           </div>
         )}
 
-        {/* TAMPILAN TRANSAKSI (List Cards dengan Ikon Custom) */}
+        {/* TAMPILAN TRANSAKSI (List Cards dengan Fungsi Expand) */}
         {activeTab === 'transaksi' && (
           <div>
             <input type="text" placeholder="🔍 Cari pair atau catatan..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={{...styles.input, marginBottom: '15px'}} />
             <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
                {[...filteredTrades].reverse().map(item => (
-                 <div key={item.id} style={styles.tradeCard}>
+                 <div 
+                   key={item.id} 
+                   style={styles.tradeCard} 
+                   onClick={() => setExpandedTrade(expandedTrade === item.id ? null : item.id)} // FUNGSI KLIK
+                 >
                     <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '8px'}}>
                        <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
                          <h4 style={{margin: 0, color: '#fff'}}>{item.pair}</h4>
@@ -386,10 +427,21 @@ export default function App() {
                     </div>
                     <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
                        <span style={{fontSize: '11px', background: '#374151', padding: '2px 6px', borderRadius: '4px'}}>{item.strategy || 'Tanpa Tag'}</span>
-                       <button onClick={() => handleDelete(item.id)} style={{background: 'none', border: 'none', color: '#6b7280', fontSize: '16px', cursor: 'pointer', padding: 0}}><CustomDeleteIcon size={18} /></button>
+                       <button onClick={(e) => handleDelete(e, item.id)} style={{background: 'none', border: 'none', color: '#6b7280', fontSize: '16px', cursor: 'pointer', padding: 0}}><CustomDeleteIcon size={18} /></button>
                     </div>
+
+                    {/* DETAIL EXPAND KETIKA DIKLIK */}
+                    {expandedTrade === item.id && (
+                      <div style={{marginTop: '12px', paddingTop: '12px', borderTop: '1px dashed #4B5563', display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '12px', color: '#d1d5db'}}>
+                        <div style={{display:'flex', justifyContent:'space-between'}}><span>Lot: <strong style={{color:'#fff'}}>{item.lot}</strong></span> <span>Broker: <strong style={{color:'#fff'}}>{item.broker || '-'}</strong></span></div>
+                        <div style={{display:'flex', justifyContent:'space-between'}}><span>Stop Loss: <strong style={{color:'#fff'}}>{item.stopLoss || '-'}</strong></span> <span>Take Profit: <strong style={{color:'#fff'}}>{item.takeProfit || '-'}</strong></span></div>
+                        <div style={{display:'flex', justifyContent:'space-between'}}><span>Komisi: <strong style={{color:'#fff'}}>{item.commission || '-'}</strong></span> <span>Swap: <strong style={{color:'#fff'}}>{item.swap || '-'}</strong></span></div>
+                        {item.notes && <div style={{marginTop: '4px', fontStyle: 'italic', color: '#9ca3af'}}>Catatan: {item.notes}</div>}
+                      </div>
+                    )}
                  </div>
                ))}
+               {filteredTrades.length === 0 && <p style={{textAlign: 'center', color: '#6b7280'}}>Tidak ada transaksi</p>}
             </div>
           </div>
         )}
@@ -473,7 +525,7 @@ export default function App() {
            </div>
         )}
 
-        {/* TAMPILAN SETTING (Pake Ikon UI Custom Besar) */}
+        {/* TAMPILAN SETTING */}
         {activeTab === 'setting' && (
            <div style={styles.card}>
               <div style={{...styles.cardHeader, marginBottom:'20px'}}><FiSettings size={30} /> <h3 style={{marginTop: 0, color: '#fff'}}>Pengaturan</h3></div>
@@ -604,7 +656,7 @@ const styles = {
   
   typeBtn: { flex: 1, padding: '12px', borderRadius: '8px', border: 'none', color: '#fff', fontWeight: 'bold', display:'flex', alignItems:'center', justifyContent:'center', gap:'5px' },
   
-  tradeCard: { background: '#1f2937', borderRadius: '10px', padding: '15px', border: '1px solid #374151', borderLeft: '4px solid #3B82F6', transition:'background 0.2s', ':hover': {background: '#2d3748'} },
+  tradeCard: { background: '#1f2937', borderRadius: '10px', padding: '15px', border: '1px solid #374151', borderLeft: '4px solid #3B82F6', transition:'background 0.2s', cursor: 'pointer', ':hover': {background: '#2d3748'} },
   settingItem: { display: 'flex', justifyContent: 'space-between', padding: '15px 0', borderBottom: '1px solid #374151', fontSize: '14px' },
   
   bottomNav: { position: 'fixed', bottom: 0, left: 0, right: 0, background: '#1f2937', display: 'flex', justifyContent: 'space-around', padding: '10px 0', borderTop: '1px solid #374151', zIndex: 10, paddingBottom: 'env(safe-area-inset-bottom)' },
