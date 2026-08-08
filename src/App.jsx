@@ -7,7 +7,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase'; 
 import { 
-  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Area, AreaChart 
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Area, AreaChart 
 } from 'recharts';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
@@ -23,11 +23,16 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [currency, setCurrency] = useState('USD'); 
 
+  // Tab Navigasi Bawah
+  const [activeTab, setActiveTab] = useState('dashboard');
+
+  // State Transaksi
   const [trades, setTrades] = useState([]);
-  const [pair, setPair] = useState('EURUSD');
+  const [pair, setPair] = useState('XAUUSD');
   const [type, setType] = useState('BUY');
   const [lot, setLot] = useState('');
   const [pnl, setPnl] = useState('');
+  const [strategy, setStrategy] = useState('Scalping'); // Fitur Baru
   const [notes, setNotes] = useState('');
   
   const [searchTerm, setSearchTerm] = useState('');
@@ -37,9 +42,7 @@ export default function App() {
   const [chartPeriod, setChartPeriod] = useState('Semua'); 
 
   const formatMoney = (val) => {
-    if (currency === 'IDR') {
-      return 'Rp' + Math.abs(val).toLocaleString('id-ID');
-    }
+    if (currency === 'IDR') return 'Rp' + Math.abs(val).toLocaleString('id-ID');
     return '$' + Math.abs(val).toFixed(2);
   };
 
@@ -86,173 +89,61 @@ export default function App() {
   const handleAddTrade = async (e) => {
     e.preventDefault();
     if (!lot || !pnl) return;
-
     const dateObj = new Date();
-    const monthYear = dateObj.toLocaleDateString('id-ID', { month: 'short', year: 'numeric' });
-
     await addDoc(collection(db, 'forex_trades'), {
       userId: user.uid,
-      pair,
-      type,
-      lot: parseFloat(lot),
-      pnl: parseFloat(pnl),
-      notes,
+      pair, type, lot: parseFloat(lot), pnl: parseFloat(pnl), notes, strategy,
       date: dateObj.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' }),
-      monthYear: monthYear,
       timestamp: dateObj.getTime()
     });
-
-    setLot('');
-    setPnl('');
-    setNotes('');
+    setLot(''); setPnl(''); setNotes('');
+    alert('Transaksi berhasil disimpan!');
   };
 
   const handleDelete = async (id) => {
-    if(window.confirm("Yakin ingin menghapus jurnal ini?")) {
-      await deleteDoc(doc(db, 'forex_trades', id));
-    }
+    if(window.confirm("Yakin ingin menghapus jurnal ini?")) await deleteDoc(doc(db, 'forex_trades', id));
   };
 
   const filteredTrades = trades.filter(t => {
-    const matchSearch = t.pair.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                        (t.notes && t.notes.toLowerCase().includes(searchTerm.toLowerCase()));
-    
-    let matchTime = true;
-    if (filterType !== 'Semua' && filterValue) {
-      const d = new Date(t.timestamp);
-      if (filterType === 'Hari') {
-        const tDate = d.toLocaleDateString('en-CA');
-        matchTime = (tDate === filterValue);
-      } else if (filterType === 'Bulan') {
-        const tMonth = d.toLocaleDateString('en-CA').slice(0, 7);
-        matchTime = (tMonth === filterValue);
-      } else if (filterType === 'Tahun') {
-        matchTime = (d.getFullYear().toString() === filterValue);
-      } else if (filterType === 'Minggu') {
-        const targetD = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-        targetD.setUTCDate(targetD.getUTCDate() + 4 - (targetD.getUTCDay()||7));
-        const yearStart = new Date(Date.UTC(targetD.getUTCFullYear(),0,1));
-        const weekNo = Math.ceil(( ( (targetD - yearStart) / 86400000) + 1)/7);
-        const weekStr = targetD.getUTCFullYear() + "-W" + (weekNo < 10 ? '0'+weekNo : weekNo);
-        matchTime = (weekStr === filterValue);
-      }
-    }
-    return matchSearch && matchTime;
+    return t.pair.toLowerCase().includes(searchTerm.toLowerCase()) || 
+           (t.notes && t.notes.toLowerCase().includes(searchTerm.toLowerCase()));
   });
 
-  const chartTrades = useMemo(() => {
-    if (chartPeriod === 'Semua') return filteredTrades;
-    const now = new Date().getTime();
-    const periods = {
-      '1 Minggu': 7 * 24 * 60 * 60 * 1000,
-      '1 Bulan': 30 * 24 * 60 * 60 * 1000,
-      '1 Tahun': 365 * 24 * 60 * 60 * 1000,
-      '3 Tahun': 3 * 365 * 24 * 60 * 60 * 1000,
-    };
-    const limit = now - periods[chartPeriod];
-    return filteredTrades.filter(t => t.timestamp >= limit);
-  }, [filteredTrades, chartPeriod]);
-
+  const chartTrades = useMemo(() => filteredTrades, [filteredTrades]);
   const totalPnl = filteredTrades.reduce((acc, item) => acc + item.pnl, 0);
   const totalWin = filteredTrades.filter(t => t.pnl > 0).length;
   const totalLoss = filteredTrades.filter(t => t.pnl < 0).length;
   const winRate = filteredTrades.length ? ((totalWin / filteredTrades.length) * 100).toFixed(1) : 0;
+  const rrRatio = totalLoss > 0 ? (totalWin / totalLoss).toFixed(2) : totalWin;
 
   const chartData = useMemo(() => {
     let runningBalance = 0;
     return chartTrades.map((t, index) => {
       runningBalance += parseFloat(t.pnl);
-      // Membulatkan desimal agar rapi dan menghilangkan error angka panjang
-      const roundedBalance = Math.round(runningBalance * 100) / 100;
-      return {
-        tradeCount: `T${index + 1}`,
-        balance: roundedBalance,
-        pair: t.pair,
-        pnl: t.pnl
-      };
+      return { tradeCount: `T${index + 1}`, balance: Math.round(runningBalance * 100) / 100 };
     });
   }, [chartTrades]);
-
-  const exportToPDF = () => {
-    const doc = new jsPDF();
-    doc.setFontSize(20);
-    doc.setTextColor(41, 128, 185);
-    doc.text('STARFX - Laporan Jurnal Perdagangan', 14, 22);
-    
-    doc.setFontSize(11);
-    doc.setTextColor(100);
-    doc.text(`Periode Filter: ${filterType === 'Semua' ? 'Keseluruhan Waktu' : filterValue}`, 14, 30);
-    doc.text(`Email Trader: ${user.email}`, 14, 36);
-    doc.text(`Tanggal Cetak: ${new Date().toLocaleDateString('id-ID')}`, 14, 42);
-
-    doc.setFontSize(12);
-    doc.setTextColor(0);
-    doc.text(`Ringkasan Kinerja:`, 14, 52);
-    doc.setFontSize(10);
-    doc.text(`Total Transaksi: ${filteredTrades.length} Trades`, 14, 58);
-    doc.text(`Win Rate: ${winRate}% (${totalWin} Win / ${totalLoss} Loss)`, 14, 64);
-    
-    const pnlText = `Net Profit/Loss: ${totalPnl >= 0 ? '+' : '-'}${formatMoney(totalPnl)}`;
-    doc.setTextColor(totalPnl >= 0 ? 39 : 231, totalPnl >= 0 ? 174 : 76, totalPnl >= 0 ? 96 : 60);
-    doc.text(pnlText, 14, 70);
-
-    const tableColumn = ["Tanggal", "Asset", "Aksi", "Lot", `PnL (${currency})`, "Catatan"];
-    const tableRows = [];
-
-    [...filteredTrades].reverse().forEach(trade => {
-      const pnlDisplay = trade.pnl >= 0 ? `+${formatMoney(trade.pnl)}` : `-${formatMoney(trade.pnl)}`;
-      const tradeData = [trade.date, trade.pair, trade.type, trade.lot, pnlDisplay, trade.notes || '-'];
-      tableRows.push(tradeData);
-    });
-
-    doc.autoTable({
-      head: [tableColumn],
-      body: tableRows,
-      startY: 78,
-      theme: 'striped',
-      headStyles: { fillColor: [41, 128, 185] },
-      styles: { fontSize: 9 },
-    });
-
-    doc.save(`STARFX_Report.pdf`);
-  };
 
   if (!user) {
     return (
       <div style={styles.authContainer}>
         <div style={styles.authCard}>
-          <div style={styles.glowCircle}></div>
-          <h2 style={styles.brandTitle}>⚡ STARFX <span style={{color: '#fff'}}>JOURNAL</span></h2>
-          <p style={styles.subTitle}>{isRegister ? 'Mulai perjalanan disiplinmu' : 'Masuk ke Ruang Kerjamu'}</p>
-          
+          <h2 style={styles.brandTitle}>⚡ STARFX</h2>
+          <p style={styles.subTitle}>{isRegister ? 'Daftar Akun Baru' : 'Login ke Dashboard'}</p>
           {authError && <div style={styles.errorBox}>{authError}</div>}
-
           <form onSubmit={handleAuth} style={styles.form}>
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>Email Address</label>
-              <input type="email" placeholder="trade@starfx.com" value={email} onChange={e => setEmail(e.target.value)} required style={styles.input} />
-            </div>
-            <div style={styles.inputGroup}>
-              <label style={styles.label}>Password</label>
-              <input type="password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} required style={styles.input} />
-            </div>
-            
+            <input type="email" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} required style={styles.input} />
+            <input type="password" placeholder="Password" value={password} onChange={e => setPassword(e.target.value)} required style={styles.input} />
             {isRegister && (
-              <div style={styles.inputGroup}>
-                <label style={styles.label}>Mata Uang Akun</label>
-                <select value={currency} onChange={e => setCurrency(e.target.value)} style={styles.input}>
-                  <option value="USD">Dolar Amerika (USD $)</option>
-                  <option value="IDR">Rupiah Indonesia (IDR Rp)</option>
-                </select>
-              </div>
+              <select value={currency} onChange={e => setCurrency(e.target.value)} style={styles.input}>
+                <option value="USD">Dolar (USD)</option>
+                <option value="IDR">Rupiah (IDR)</option>
+              </select>
             )}
-
-            <button type="submit" style={styles.btnPrimary}>{isRegister ? 'Daftar Sekarang' : 'Login Dashboard'}</button>
+            <button type="submit" style={styles.btnPrimary}>{isRegister ? 'Daftar' : 'Login'}</button>
           </form>
-
-          <p style={styles.switchAuth}>
-            {isRegister ? 'Sudah menjadi member?' : 'Trader baru?'} {' '}
-            <span onClick={() => setIsRegister(!isRegister)} style={styles.link}>{isRegister ? 'Login disini' : 'Buat Akun'}</span>
+          <p style={styles.switchAuth} onClick={() => setIsRegister(!isRegister)}>
+            {isRegister ? 'Sudah punya akun? Login' : 'Belum punya akun? Daftar'}
           </p>
         </div>
       </div>
@@ -260,282 +151,224 @@ export default function App() {
   }
 
   return (
-    <div style={styles.dashboard}>
-      <header style={styles.nav}>
+    <div style={styles.appContainer}>
+      {/* HEADER */}
+      <header style={styles.header}>
         <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
-          <div style={{background: 'linear-gradient(135deg, #0ea5e9, #8b5cf6)', padding: '6px', borderRadius: '8px'}}>
-             <h3 style={{margin: 0, color: '#fff', fontSize: '18px'}}>⚡</h3>
+          <span style={{fontSize: '24px'}}>⚡</span>
+          <div>
+            <h3 style={{margin: 0, fontSize: '18px', color: '#fff'}}>STARFX</h3>
+            <span style={{fontSize: '12px', color: '#9ca3af'}}>{user.email.split('@')[0]}</span>
           </div>
-          <h3 style={{margin: 0, color: '#f8fafc', letterSpacing: '1px'}}>STARFX <span style={{fontWeight: 300, fontSize: '14px', color: '#94a3b8'}}>Pro Journal</span></h3>
         </div>
-        <div style={{display: 'flex', alignItems: 'center', gap: '20px'}}>
-          <span style={{fontSize: '13px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '8px'}}>
-             <span style={{width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981'}}></span>
-             {user.email} | {currency}
-          </span>
-          <button onClick={() => signOut(auth)} style={styles.btnDanger}>Logout</button>
+        <div style={{display: 'flex', gap: '10px', alignItems: 'center'}}>
+           <div style={styles.balanceBadge}>{formatMoney(totalPnl)}</div>
+           <div style={styles.profileBtn}>👤</div>
         </div>
       </header>
 
-      <div style={styles.content}>
+      {/* KONTEN UTAMA */}
+      <div style={styles.mainContent}>
         
-        <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px', flexWrap: 'wrap', gap: '15px'}}>
-           <h2 style={{margin: 0, fontWeight: '600', fontSize: '24px'}}>Ikhtisar Kinerja</h2>
-           <div style={{display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap'}}>
-              
-              <select value={filterType} onChange={(e) => {setFilterType(e.target.value); setFilterValue('');}} style={styles.selectOutline}>
-                <option value="Semua">Semua Waktu</option>
-                <option value="Hari">Harian</option>
-                <option value="Minggu">Mingguan</option>
-                <option value="Bulan">Bulanan</option>
-                <option value="Tahun">Tahunan</option>
-              </select>
+        {/* TAMPILAN DASHBOARD */}
+        {activeTab === 'dashboard' && (
+          <div>
+            {/* Quick Actions */}
+            <div style={styles.quickActions}>
+               <button style={styles.actionBtn} onClick={() => setActiveTab('tambah')}>➕ Tambah</button>
+               <button style={styles.actionBtn}>📄 Export</button>
+               <button style={styles.actionBtn}>🔍 Filter</button>
+            </div>
 
-              {filterType === 'Hari' && <input type="date" value={filterValue} onChange={e => setFilterValue(e.target.value)} style={styles.selectOutline} />}
-              {filterType === 'Minggu' && <input type="week" value={filterValue} onChange={e => setFilterValue(e.target.value)} style={styles.selectOutline} />}
-              {filterType === 'Bulan' && <input type="month" value={filterValue} onChange={e => setFilterValue(e.target.value)} style={styles.selectOutline} />}
-              {filterType === 'Tahun' && <input type="number" placeholder="Tahun (Contoh: 2026)" value={filterValue} onChange={e => setFilterValue(e.target.value)} style={{...styles.selectOutline, width: '130px'}} />}
+            {/* 4 Cards Grid */}
+            <div style={styles.statsGrid}>
+              <div style={styles.card}>
+                <span style={styles.cardLabel}>💰 Total Profit/Loss</span>
+                <h3 style={{color: totalPnl >= 0 ? '#10B981' : '#EF4444', margin: '5px 0'}}>{totalPnl >= 0 ? '+' : '-'}{formatMoney(totalPnl)}</h3>
+              </div>
+              <div style={styles.card}>
+                <span style={styles.cardLabel}>📈 Win Rate</span>
+                <h3 style={{color: '#3B82F6', margin: '5px 0'}}>{winRate}%</h3>
+              </div>
+              <div style={styles.card}>
+                <span style={styles.cardLabel}>⚖️ Risk Reward</span>
+                <h3 style={{color: '#F59E0B', margin: '5px 0'}}>1 : {rrRatio}</h3>
+              </div>
+              <div style={styles.card}>
+                <span style={styles.cardLabel}>📊 Total Trade</span>
+                <h3 style={{color: '#fff', margin: '5px 0'}}>{filteredTrades.length}</h3>
+              </div>
+            </div>
 
-              <button onClick={exportToPDF} style={styles.btnExport}>
-                📄 Unduh Laporan PDF
-              </button>
+            {/* Equity Curve */}
+            <div style={{...styles.card, height: '300px', marginTop: '15px'}}>
+               <span style={styles.cardLabel}>📉 Equity Curve</span>
+               {chartTrades.length === 0 ? <p style={{textAlign: 'center', color: '#6b7280'}}>Belum ada data</p> : (
+                 <ResponsiveContainer width="100%" height="90%">
+                   <AreaChart data={chartData}>
+                     <defs>
+                       <linearGradient id="colorBal" x1="0" y1="0" x2="0" y2="1">
+                         <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.5}/>
+                         <stop offset="95%" stopColor="#3B82F6" stopOpacity={0}/>
+                       </linearGradient>
+                     </defs>
+                     <CartesianGrid strokeDasharray="3 3" stroke="#374151" vertical={false} />
+                     <XAxis dataKey="tradeCount" hide />
+                     <YAxis stroke="#9ca3af" fontSize={11} width={40} tickFormatter={(val) => currency==='IDR'?(val/1000)+'k':val} />
+                     <Tooltip contentStyle={{backgroundColor: '#1f2937', borderColor: '#374151', color: '#fff'}}/>
+                     <ReferenceLine y={0} stroke="#4B5563" />
+                     <Area type="monotone" dataKey="balance" stroke="#3B82F6" strokeWidth={3} fill="url(#colorBal)" />
+                   </AreaChart>
+                 </ResponsiveContainer>
+               )}
+            </div>
+          </div>
+        )}
+
+        {/* TAMPILAN TAMBAH TRANSAKSI (Dipindah dari Dashboard agar lega) */}
+        {activeTab === 'tambah' && (
+          <div style={styles.card}>
+             <h3 style={{marginTop: 0}}>➕ Input Transaksi Baru</h3>
+             <form onSubmit={handleAddTrade} style={{display: 'flex', flexDirection: 'column', gap: '15px'}}>
+               <select value={pair} onChange={e => setPair(e.target.value)} style={styles.input}>
+                  <option>XAUUSD</option><option>EURUSD</option><option>GBPUSD</option>
+                  <option>BTCUSD</option><option>US30</option>
+               </select>
+               <select value={strategy} onChange={e => setStrategy(e.target.value)} style={styles.input}>
+                  <option>Scalping</option><option>Swing Trade</option><option>News Trading</option>
+                  <option>SMC / ICT</option><option>Support & Resistance</option>
+               </select>
+               <div style={{display: 'flex', gap: '10px'}}>
+                  <button type="button" onClick={() => setType('BUY')} style={{...styles.typeBtn, background: type === 'BUY' ? '#3B82F6' : '#1f2937'}}>BUY</button>
+                  <button type="button" onClick={() => setType('SELL')} style={{...styles.typeBtn, background: type === 'SELL' ? '#EF4444' : '#1f2937'}}>SELL</button>
+               </div>
+               <div style={{display: 'flex', gap: '10px'}}>
+                  <input type="number" step="0.01" placeholder="Lot (cth: 0.10)" value={lot} onChange={e => setLot(e.target.value)} style={{...styles.input, flex: 1}} required />
+                  <input type="number" step="0.01" placeholder={`PnL (${currency})`} value={pnl} onChange={e => setPnl(e.target.value)} style={{...styles.input, flex: 1}} required />
+               </div>
+               <textarea rows="2" placeholder="Catatan trading..." value={notes} onChange={e => setNotes(e.target.value)} style={styles.input} />
+               <button type="submit" style={styles.btnPrimary}>Simpan</button>
+             </form>
+          </div>
+        )}
+
+        {/* TAMPILAN TRANSAKSI (Berupa List Cards) */}
+        {activeTab === 'transaksi' && (
+          <div>
+            <input type="text" placeholder="🔍 Cari pair atau catatan..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={{...styles.input, marginBottom: '15px'}} />
+            <div style={{display: 'flex', flexDirection: 'column', gap: '10px'}}>
+               {[...filteredTrades].reverse().map(item => (
+                 <div key={item.id} style={styles.tradeCard}>
+                    <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '8px'}}>
+                       <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
+                         <h4 style={{margin: 0, color: '#fff'}}>{item.pair}</h4>
+                         <span style={{fontSize: '11px', padding: '2px 6px', borderRadius: '4px', background: item.type === 'BUY' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(239, 68, 68, 0.2)', color: item.type === 'BUY' ? '#3B82F6' : '#EF4444'}}>
+                           {item.type}
+                         </span>
+                       </div>
+                       <h4 style={{margin: 0, color: item.pnl >= 0 ? '#10B981' : '#EF4444'}}>{item.pnl >= 0 ? '+' : '-'}{formatMoney(item.pnl)}</h4>
+                    </div>
+                    <div style={{display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#9ca3af', marginBottom: '8px'}}>
+                       <span>Lot: {item.lot}</span>
+                       <span>{item.date}</span>
+                    </div>
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
+                       <span style={{fontSize: '11px', background: '#374151', padding: '2px 6px', borderRadius: '4px'}}>{item.strategy || 'Tanpa Tag'}</span>
+                       <button onClick={() => handleDelete(item.id)} style={{background: 'none', border: 'none', color: '#6b7280', fontSize: '14px', cursor: 'pointer'}}>🗑️</button>
+                    </div>
+                 </div>
+               ))}
+            </div>
+          </div>
+        )}
+
+        {/* TAMPILAN STATISTIK (SEGERA HADIR) */}
+        {activeTab === 'statistik' && (
+           <div style={{textAlign: 'center', color: '#9ca3af', marginTop: '50px'}}>
+              <span style={{fontSize: '40px'}}>📊</span>
+              <h3>Statistik Lanjutan</h3>
+              <p>Fitur Profit Factor, Max Drawdown, dan Target Bulanan sedang dalam tahap pengembangan.</p>
            </div>
-        </div>
+        )}
 
-        <div style={styles.statsGrid}>
-          <div style={styles.card}>
-            <div style={styles.cardIconBox}><span style={{fontSize: '20px'}}>💰</span></div>
-            <span style={styles.cardTitle}>Net Profit / Loss</span>
-            <h2 style={{color: totalPnl >= 0 ? '#34d399' : '#fb7185', margin: '10px 0 5px 0', fontSize: '32px', fontWeight: '700'}}>
-              {totalPnl >= 0 ? '+' : '-'}{formatMoney(totalPnl)}
-            </h2>
-            <span style={{fontSize: '12px', color: '#64748b'}}>Dari {filteredTrades.length} total transaksi</span>
-          </div>
-          <div style={styles.card}>
-             <div style={{...styles.cardIconBox, background: 'rgba(14, 165, 233, 0.1)'}}><span style={{fontSize: '20px'}}>🎯</span></div>
-            <span style={styles.cardTitle}>Win Rate Akurasi</span>
-            <h2 style={{color: '#38bdf8', margin: '10px 0 5px 0', fontSize: '32px', fontWeight: '700'}}>{winRate}%</h2>
-            <span style={{fontSize: '12px', color: '#64748b'}}>Persentase kemenangan</span>
-          </div>
-          <div style={styles.card}>
-            <div style={{...styles.cardIconBox, background: 'rgba(139, 92, 246, 0.1)'}}><span style={{fontSize: '20px'}}>⚖️</span></div>
-            <span style={styles.cardTitle}>Rasio Win / Loss</span>
-            <div style={{display: 'flex', alignItems: 'center', gap: '10px', margin: '10px 0 5px 0'}}>
-                <h2 style={{margin: 0, fontSize: '28px', color: '#34d399'}}>{totalWin}W</h2>
-                <span style={{color: '#475569', fontSize: '20px'}}>/</span>
-                <h2 style={{margin: 0, fontSize: '28px', color: '#fb7185'}}>{totalLoss}L</h2>
-            </div>
-            <span style={{fontSize: '12px', color: '#64748b'}}>Frekuensi hasil trading</span>
-          </div>
-        </div>
+        {/* TAMPILAN PORTOFOLIO (SEGERA HADIR) */}
+        {activeTab === 'portofolio' && (
+           <div style={{textAlign: 'center', color: '#9ca3af', marginTop: '50px'}}>
+              <span style={{fontSize: '40px'}}>💼</span>
+              <h3>Multi Akun Broker</h3>
+              <p>Fitur untuk melacak Headway, IC Markets, dan Exness akan segera hadir.</p>
+           </div>
+        )}
 
-        <div style={{...styles.card, marginBottom: '25px', height: '420px', padding: '30px'}}>
-          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap'}}>
-             <h4 style={{color: '#f8fafc', fontWeight: '600', margin: 0, fontSize: '16px'}}>📈 Pertumbuhan Akun</h4>
-             
-             <div style={{display: 'flex', gap: '5px', background: '#020617', padding: '5px', borderRadius: '8px'}}>
-                {['1 Minggu', '1 Bulan', '1 Tahun', '3 Tahun', 'Semua'].map(p => (
-                   <button 
-                      key={p} 
-                      onClick={() => setChartPeriod(p)} 
-                      style={{...styles.chartBtn, background: chartPeriod === p ? '#38bdf8' : 'transparent', color: chartPeriod === p ? '#020617' : '#94a3b8'}}
-                   >
-                      {p}
-                   </button>
-                ))}
-             </div>
-          </div>
-          
-          {chartTrades.length === 0 ? (
-             <div style={{height: '80%', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column'}}>
-                <span style={{fontSize: '40px', opacity: 0.5}}>📊</span>
-                <p style={{color: '#64748b', fontSize: '14px', marginTop: '15px'}}>Belum ada data untuk periode grafik ini.</p>
-             </div>
-          ) : (
-            <ResponsiveContainer width="100%" height="80%">
-              <AreaChart data={chartData} margin={{ top: 10, right: 10, left: currency === 'IDR' ? 10 : -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="colorBalance" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#38bdf8" stopOpacity={0.4}/>
-                    <stop offset="95%" stopColor="#38bdf8" stopOpacity={0}/>
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                <XAxis dataKey="tradeCount" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-                <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(value) => formatMoney(value)} />
-                <Tooltip 
-                   formatter={(value) => [(value >= 0 ? '+' : '-') + formatMoney(value), "Total Saldo"]}
-                   contentStyle={{backgroundColor: 'rgba(15, 23, 42, 0.9)', backdropFilter: 'blur(5px)', border: '1px solid #334155', borderRadius: '12px', color: '#fff', boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5)'}} 
-                   itemStyle={{color: '#38bdf8', fontWeight: 'bold'}} 
-                />
-                <ReferenceLine y={0} stroke="#475569" strokeDasharray="3 3" />
-                <Area type="monotone" dataKey="balance" name="Total Saldo" stroke="#38bdf8" strokeWidth={3} fillOpacity={1} fill="url(#colorBalance)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-
-        <div style={styles.mainGrid}>
-          {/* Input Form Card */}
-          <div style={{...styles.card, height: 'fit-content', flex: '1 1 300px'}}>
-            <div style={{display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px'}}>
-               <span style={{background: '#1e293b', padding: '8px', borderRadius: '8px', fontSize: '16px'}}>✍️</span>
-               <h4 style={{color: '#f8fafc', fontWeight: '600', margin: 0}}>Input Jurnal</h4>
-            </div>
-            
-            <form onSubmit={handleAddTrade} style={{display: 'flex', flexDirection: 'column', gap: '15px'}}>
-              <div style={styles.inputGroup}>
-                <label style={styles.label}>Pair / Asset</label>
-                <select value={pair} onChange={e => setPair(e.target.value)} style={styles.input}>
-                  <optgroup label="Majors">
-                    <option>EURUSD</option><option>GBPUSD</option><option>USDJPY</option>
-                    <option>USDCAD</option><option>USDCHF</option><option>AUDUSD</option><option>NZDUSD</option>
-                  </optgroup>
-                  <optgroup label="Minors & Crosses">
-                    <option>EURGBP</option><option>EURJPY</option><option>GBPJPY</option><option>AUDJPY</option>
-                  </optgroup>
-                  <optgroup label="Commodities">
-                    <option>XAUUSD</option><option>XAGUSD</option><option>WTI (Oil)</option>
-                  </optgroup>
-                  <optgroup label="Crypto & Indices">
-                    <option>BTCUSD</option><option>ETHUSD</option><option>US30</option><option>NAS100</option>
-                  </optgroup>
-                </select>
+        {/* TAMPILAN SETTING */}
+        {activeTab === 'setting' && (
+           <div style={styles.card}>
+              <h3 style={{marginTop: 0, marginBottom: '20px'}}>⚙️ Pengaturan</h3>
+              <div style={styles.settingItem}>
+                 <span>Mata Uang</span>
+                 <span style={{color: '#3B82F6'}}>{currency}</span>
               </div>
-
-              <div style={styles.inputGroup}>
-                <label style={styles.label}>Jenis Posisi</label>
-                <div style={{display: 'flex', gap: '10px', width: '100%'}}>
-                  <button type="button" onClick={() => setType('BUY')} style={{...styles.toggleBtn, background: type === 'BUY' ? 'rgba(56, 189, 248, 0.1)' : 'transparent', color: type === 'BUY' ? '#38bdf8' : '#64748b', borderColor: type === 'BUY' ? '#38bdf8' : '#334155'}}>
-                    📈 BUY
-                  </button>
-                  <button type="button" onClick={() => setType('SELL')} style={{...styles.toggleBtn, background: type === 'SELL' ? 'rgba(251, 113, 133, 0.1)' : 'transparent', color: type === 'SELL' ? '#fb7185' : '#64748b', borderColor: type === 'SELL' ? '#fb7185' : '#334155'}}>
-                    📉 SELL
-                  </button>
-                </div>
+              <div style={styles.settingItem}>
+                 <span>Backup Cloud Firebase</span>
+                 <span style={{color: '#10B981'}}>Aktif ✅</span>
               </div>
+              <button onClick={() => signOut(auth)} style={{...styles.btnPrimary, background: '#EF4444', marginTop: '20px'}}>Logout Akun</button>
+           </div>
+        )}
 
-              <div style={{display: 'flex', gap: '12px'}}>
-                <div style={{flex: 1, ...styles.inputGroup}}>
-                  <label style={styles.label}>Lot Size</label>
-                  <input type="number" step="0.01" placeholder="0.10" value={lot} onChange={e => setLot(e.target.value)} required style={styles.input} />
-                </div>
-                <div style={{flex: 1, ...styles.inputGroup}}>
-                  <label style={styles.label}>Hasil PnL ({currency})</label>
-                  <input type="number" step="0.01" placeholder={currency === 'IDR' ? "500000" : "50.00"} value={pnl} onChange={e => setPnl(e.target.value)} required style={{...styles.input, color: pnl > 0 ? '#34d399' : pnl < 0 ? '#fb7185' : '#f8fafc'}} />
-                </div>
-              </div>
-
-              <div style={styles.inputGroup}>
-                <label style={styles.label}>Catatan (Opsional)</label>
-                <textarea rows="2" placeholder="Tulis alasan masuk posisi, setup, atau kesalahan..." value={notes} onChange={e => setNotes(e.target.value)} style={{...styles.input, resize: 'none'}} />
-              </div>
-
-              <button type="submit" style={styles.btnGradient}>Simpan Transaksi</button>
-            </form>
-          </div>
-
-          {/* Table Card with Scroll */}
-          <div style={{...styles.card, display: 'flex', flexDirection: 'column', flex: '2 1 500px'}}>
-            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px'}}>
-              <h4 style={{color: '#f8fafc', fontWeight: '600', margin: 0}}>📋 Riwayat Trading</h4>
-              <div style={{position: 'relative'}}>
-                <span style={{position: 'absolute', left: '12px', top: '9px', fontSize: '12px', color: '#64748b'}}>🔍</span>
-                <input type="text" placeholder="Cari Pair / Catatan..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} style={{...styles.input, width: '220px', padding: '8px 12px 8px 32px', fontSize: '13px', background: '#020617'}} />
-              </div>
-            </div>
-
-            {/* Area Tabel dengan Scrollbar Dalam */}
-            <div style={{overflowX: 'auto', overflowY: 'auto', maxHeight: '450px', borderRadius: '8px', border: '1px solid #1e293b'}}>
-              <table style={styles.table}>
-                <thead>
-                  <tr style={{textAlign: 'left'}}>
-                    <th style={{...styles.th, position: 'sticky', top: 0, backgroundColor: '#020617', zIndex: 1}}>Waktu</th>
-                    <th style={{...styles.th, position: 'sticky', top: 0, backgroundColor: '#020617', zIndex: 1}}>Asset</th>
-                    <th style={{...styles.th, position: 'sticky', top: 0, backgroundColor: '#020617', zIndex: 1}}>Posisi</th>
-                    <th style={{...styles.th, position: 'sticky', top: 0, backgroundColor: '#020617', zIndex: 1}}>Lot</th>
-                    <th style={{...styles.th, position: 'sticky', top: 0, backgroundColor: '#020617', zIndex: 1}}>PnL</th>
-                    <th style={{...styles.th, position: 'sticky', top: 0, backgroundColor: '#020617', zIndex: 1}}>Catatan</th>
-                    <th style={{...styles.th, position: 'sticky', top: 0, backgroundColor: '#020617', zIndex: 1}}>Aksi</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredTrades.length === 0 ? (
-                    <tr><td colSpan="7" style={{padding: '30px', textAlign: 'center', color: '#64748b'}}>Tidak ada data transaksi yang ditemukan.</td></tr>
-                  ) : (
-                    [...filteredTrades].reverse().map((item) => (
-                      <tr key={item.id} style={styles.trHover}>
-                        <td style={styles.td}>
-                          <div style={{display: 'flex', flexDirection: 'column'}}>
-                             <span style={{color: '#e2e8f0'}}>{item.date}</span>
-                          </div>
-                        </td>
-                        <td style={styles.td}><span style={styles.badge}>{item.pair}</span></td>
-                        <td style={styles.td}>
-                           <span style={{
-                              padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 'bold',
-                              background: item.type === 'BUY' ? 'rgba(56, 189, 248, 0.1)' : 'rgba(251, 113, 133, 0.1)',
-                              color: item.type === 'BUY' ? '#38bdf8' : '#fb7185'
-                           }}>
-                             {item.type}
-                           </span>
-                        </td>
-                        <td style={styles.td}>{item.lot}</td>
-                        <td style={{...styles.td, color: item.pnl >= 0 ? '#34d399' : '#fb7185', fontWeight: 'bold'}}>
-                          {item.pnl >= 0 ? '+' : '-'}{formatMoney(item.pnl)}
-                        </td>
-                        <td style={{...styles.td, color: '#94a3b8', maxWidth: '150px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>
-                          {item.notes || '-'}
-                        </td>
-                        <td style={styles.td}>
-                           <button onClick={() => handleDelete(item.id)} style={{background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '14px', opacity: 0.7}}>
-                             🗑️
-                           </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
       </div>
+
+      {/* BOTTOM NAVIGATION */}
+      <nav style={styles.bottomNav}>
+         {[
+           { id: 'dashboard', icon: '🏠', label: 'Home' },
+           { id: 'transaksi', icon: '📒', label: 'Histori' },
+           { id: 'statistik', icon: '📊', label: 'Stats' },
+           { id: 'portofolio', icon: '💼', label: 'Akun' },
+           { id: 'setting', icon: '⚙️', label: 'Setting' },
+         ].map(tab => (
+           <div 
+             key={tab.id} 
+             onClick={() => setActiveTab(tab.id)} 
+             style={{...styles.navItem, color: activeTab === tab.id ? '#3B82F6' : '#6b7280'}}
+           >
+             <span style={{fontSize: '20px', marginBottom: '2px', filter: activeTab === tab.id ? 'none' : 'grayscale(100%)'}}>{tab.icon}</span>
+             <span style={{fontSize: '10px'}}>{tab.label}</span>
+           </div>
+         ))}
+      </nav>
     </div>
   );
 }
 
 const styles = {
-  authContainer: { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#0f172a' },
-  authCard: { background: '#1e293b', padding: '40px', borderRadius: '16px', width: '350px', textAlign: 'center', position: 'relative', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)' },
-  glowCircle: { position: 'absolute', top: '-50px', right: '-50px', width: '100px', height: '100px', background: '#38bdf8', filter: 'blur(60px)', borderRadius: '50%' },
-  brandTitle: { color: '#38bdf8', margin: '0 0 5px 0', fontSize: '24px' },
-  subTitle: { color: '#94a3b8', fontSize: '14px', marginBottom: '25px' },
-  errorBox: { background: 'rgba(251, 113, 133, 0.1)', color: '#fb7185', padding: '10px', borderRadius: '8px', marginBottom: '15px', fontSize: '13px' },
+  authContainer: { display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', backgroundColor: '#111827' },
+  authCard: { background: '#1f2937', padding: '30px', borderRadius: '12px', width: '90%', maxWidth: '350px', textAlign: 'center' },
+  brandTitle: { color: '#3B82F6', margin: '0 0 5px 0', fontSize: '28px' },
+  subTitle: { color: '#9ca3af', fontSize: '14px', marginBottom: '20px' },
   form: { display: 'flex', flexDirection: 'column', gap: '15px' },
-  inputGroup: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '5px' },
-  label: { color: '#94a3b8', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase' },
-  input: { width: '100%', padding: '10px 12px', borderRadius: '8px', border: '1px solid #334155', background: '#0f172a', color: '#f8fafc', boxSizing: 'border-box' },
-  btnPrimary: { background: '#38bdf8', color: '#0f172a', padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', marginTop: '10px' },
-  switchAuth: { color: '#64748b', fontSize: '13px', marginTop: '20px' },
-  link: { color: '#38bdf8', cursor: 'pointer', fontWeight: 'bold' },
-  dashboard: { minHeight: '100vh', backgroundColor: '#0f172a', color: '#f8fafc', padding: '20px', boxSizing: 'border-box', fontFamily: 'system-ui, -apple-system, sans-serif' },
-  nav: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#1e293b', padding: '15px 25px', borderRadius: '16px', marginBottom: '25px' },
-  btnDanger: { background: 'rgba(251, 113, 133, 0.1)', color: '#fb7185', border: '1px solid #fb7185', padding: '6px 12px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 'bold' },
-  content: { maxWidth: '1200px', margin: '0 auto' },
-  selectOutline: { background: '#1e293b', color: '#f8fafc', border: '1px solid #334155', padding: '8px 12px', borderRadius: '8px', outline: 'none', fontSize: '14px' },
-  btnExport: { background: '#10b981', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '8px', cursor: 'pointer', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' },
-  statsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px', marginBottom: '25px' },
-  card: { background: '#1e293b', borderRadius: '16px', padding: '20px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)' },
-  cardIconBox: { background: 'rgba(250, 204, 21, 0.1)', width: '40px', height: '40px', borderRadius: '10px', display: 'flex', justifyContent: 'center', alignItems: 'center', marginBottom: '15px' },
-  cardTitle: { color: '#94a3b8', fontSize: '13px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '1px' },
-  mainGrid: { display: 'flex', flexWrap: 'wrap', gap: '20px' }, // Diubah agar responsif di HP
-  toggleBtn: { flex: 1, padding: '10px', borderRadius: '8px', border: '1px solid', cursor: 'pointer', fontWeight: 'bold' },
-  btnGradient: { background: 'linear-gradient(135deg, #38bdf8, #8b5cf6)', color: '#fff', border: 'none', padding: '12px', borderRadius: '8px', cursor: 'pointer', fontWeight: 'bold', marginTop: '10px' },
-  table: { width: '100%', borderCollapse: 'collapse' },
-  th: { padding: '12px 15px', color: '#94a3b8', fontSize: '12px', fontWeight: '600', borderBottom: '1px solid #1e293b' },
-  td: { padding: '15px', borderBottom: '1px solid #1e293b', fontSize: '13px' },
-  trHover: { transition: 'background 0.2s' },
-  badge: { background: '#334155', padding: '4px 8px', borderRadius: '6px', fontSize: '12px', color: '#e2e8f0' },
-  chartBtn: { border: 'none', padding: '4px 10px', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', transition: '0.2s' }
+  input: { width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #374151', background: '#111827', color: '#fff', boxSizing: 'border-box', outline: 'none' },
+  btnPrimary: { background: '#3B82F6', color: '#fff', padding: '12px', borderRadius: '8px', border: 'none', fontWeight: 'bold', cursor: 'pointer', width: '100%' },
+  switchAuth: { color: '#6b7280', fontSize: '13px', marginTop: '20px', cursor: 'pointer' },
+  
+  appContainer: { backgroundColor: '#111827', color: '#f3f4f6', minHeight: '100vh', fontFamily: 'system-ui, sans-serif', paddingBottom: '70px' },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 20px', background: '#1f2937', position: 'sticky', top: 0, zIndex: 10 },
+  balanceBadge: { background: 'rgba(16, 185, 129, 0.2)', color: '#10B981', padding: '5px 10px', borderRadius: '20px', fontSize: '14px', fontWeight: 'bold' },
+  profileBtn: { background: '#374151', width: '35px', height: '35px', borderRadius: '50%', display: 'flex', justifyContent: 'center', alignItems: 'center', cursor: 'pointer' },
+  
+  mainContent: { padding: '15px', maxWidth: '600px', margin: '0 auto' },
+  quickActions: { display: 'flex', gap: '10px', overflowX: 'auto', marginBottom: '15px' },
+  actionBtn: { background: '#1f2937', color: '#f3f4f6', border: '1px solid #374151', padding: '8px 15px', borderRadius: '20px', whiteSpace: 'nowrap', cursor: 'pointer', fontSize: '13px' },
+  
+  statsGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' },
+  card: { background: '#1f2937', borderRadius: '12px', padding: '15px', border: '1px solid #374151' },
+  cardLabel: { fontSize: '12px', color: '#9ca3af' },
+  
+  typeBtn: { flex: 1, padding: '12px', borderRadius: '8px', border: 'none', color: '#fff', fontWeight: 'bold' },
+  
+  tradeCard: { background: '#1f2937', borderRadius: '10px', padding: '15px', border: '1px solid #374151', borderLeft: '4px solid #3B82F6' },
+  settingItem: { display: 'flex', justifyContent: 'space-between', padding: '15px 0', borderBottom: '1px solid #374151', fontSize: '14px' },
+  
+  bottomNav: { position: 'fixed', bottom: 0, left: 0, right: 0, background: '#1f2937', display: 'flex', justifyContent: 'space-around', padding: '10px 0', borderTop: '1px solid #374151', zIndex: 10, paddingBottom: 'env(safe-area-inset-bottom)' },
+  navItem: { display: 'flex', flexDirection: 'column', alignItems: 'center', cursor: 'pointer', transition: 'color 0.2s' }
 };
