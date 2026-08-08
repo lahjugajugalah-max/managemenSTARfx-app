@@ -23,6 +23,8 @@ const CustomBoltIcon = ({ size = 24, color = "#FFD700" }) => (
 );
 
 export default function App() {
+  const Modal_Awal_Asumsi = 1250; // Asumsi Modal Awal Keras dipindah ke atas biar gak crash
+  
   const [user, setUser] = useState(null);
   const [isRegister, setIsRegister] = useState(false);
   
@@ -215,8 +217,6 @@ export default function App() {
     }, {});
     return Object.keys(pairGroups).map(pair => ({ name: pair, pnl: pairGroups[pair] }));
   }, [chartTrades]);
-
-  const Modal_Awal_Asumsi = 1250; // Asumsi Modal Awal Keras untuk testing
 
   if (!user) {
     return (
