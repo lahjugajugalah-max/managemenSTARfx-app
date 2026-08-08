@@ -23,8 +23,6 @@ const CustomBoltIcon = ({ size = 24, color = "#FFD700" }) => (
 );
 
 export default function App() {
-  const Modal_Awal_Asumsi = 1250; // Asumsi Modal Awal Keras dipindah ke atas biar gak crash
-  
   const [user, setUser] = useState(null);
   const [isRegister, setIsRegister] = useState(false);
   
@@ -59,6 +57,9 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('Semua'); 
   const [filterValue, setFilterValue] = useState(''); 
+
+  // Asumsi Modal Awal Keras dipindah ke sini agar tidak terjadi ReferenceError saat render grafik
+  const Modal_Awal_Asumsi = 1250; 
 
   const formatMoney = (val) => {
     if (currency === 'IDR') return 'Rp' + Math.abs(val).toLocaleString('id-ID');
@@ -159,8 +160,8 @@ export default function App() {
   // Max Drawdown (Perhitungan Dasar: % Penurunan dari Equity Puncak)
   const maxDrawdown = useMemo(() => {
     let maxDrawdownPercentage = 0;
-    let peakEquity = 1250; // Asumsi Modal Awal Keras $1250 untuk testing
-    let runningEquity = 1250;
+    let peakEquity = Modal_Awal_Asumsi; 
+    let runningEquity = Modal_Awal_Asumsi;
     for (let trade of chartTrades) {
       runningEquity += trade.pnl;
       if (runningEquity > peakEquity) peakEquity = runningEquity;
@@ -168,7 +169,7 @@ export default function App() {
       let drawdownPercentage = peakEquity > 0 ? (drawdown / peakEquity) * 100 : 0;
       if (drawdownPercentage > maxDrawdownPercentage) maxDrawdownPercentage = drawdownPercentage;
     }
-    return peakEquity === 1250 && chartTrades.length === 0 ? 0 : maxDrawdownPercentage.toFixed(2);
+    return peakEquity === Modal_Awal_Asumsi && chartTrades.length === 0 ? 0 : maxDrawdownPercentage.toFixed(2);
   }, [chartTrades]);
 
   // Winning & Losing Streak
@@ -195,7 +196,7 @@ export default function App() {
   }, [chartTrades]);
 
   const chartData = useMemo(() => {
-    let runningBalance = Modal_Awal_Asumsi; // Asumsi modal awal keras untuk testing
+    let runningBalance = Modal_Awal_Asumsi; 
     return chartTrades.map((t, index) => {
       runningBalance += parseFloat(t.pnl);
       return { tradeCount: `T${index + 1}`, balance: Math.round(runningBalance * 100) / 100 };
@@ -452,7 +453,7 @@ export default function App() {
                          <ReferenceLine x={0} stroke="#4B5563" />
                          <Bar dataKey="pnl" fill="#3B82F6" radius={[0, 4, 4, 0]}>
                            {pairPerformanceData.map((entry, index) => (
-                             <Cell fill={entry.pnl >= 0 ? '#10B981' : '#EF4444'} />
+                             <Cell key={`cell-${index}`} fill={entry.pnl >= 0 ? '#10B981' : '#EF4444'} />
                            ))}
                          </Bar>
                        </BarChart>
